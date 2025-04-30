@@ -68,3 +68,35 @@ data/
 - At least 200 total episodes recorded across all skill levels
 - Highest skill level should achieve consistent scores >200 points
 - Complete and accurate action logs corresponding to all frames
+
+## Progress Overview (Implementation Status)
+
+### Implemented so far
+- **AtariBreakoutEnv**: Custom wrapper for Gymnasium's Breakout environment with:
+  - 84x84 grayscale preprocessing
+  - Frame skipping (4 frames)
+  - Minimal action space
+- **RandomAgent**: Agent that selects random actions, records frames, actions, and rewards, and saves them to disk as PNGs and JSON.
+- **Test Suite**: Comprehensive pytest-based tests for environment and agent, including data recording and episode execution.
+- **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
+
+### Remaining tasks
+- Implement DQN agent (CNN architecture, experience replay, target network, etc.)
+- Train agent to different skill levels and save checkpoints
+- Record and organize gameplay data for each skill level (as described below)
+- Create validation splits for evaluation
+- Integrate experiment tracking (e.g., with WandB)
+
+---
+
+## Environment Setup & Troubleshooting
+
+- After installing dependencies from `requirements.txt`, run:
+  
+  ```bash
+  python -m AutoROM --accept-license
+  ```
+  This will download and install all required Atari ROMs. If you see errors about missing ROMs, re-run the above command.
+- For more details, see the comments in `requirements.txt`.
+
+---

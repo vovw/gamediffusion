@@ -1,0 +1,50 @@
+import gymnasium as gym
+import numpy as np
+import cv2
+from typing import Tuple, Dict, Any
+
+class AtariBreakoutEnv:
+    """Wrapper for Atari Breakout environment with preprocessing."""
+    
+    def __init__(self):
+        """Initialize the environment with specific settings."""
+        # Create the base Atari environment with specific settings
+        self.env = gym.make(
+            "ALE/Breakout-v5",
+            render_mode=None,  # No rendering by default
+            frameskip=4,  # Skip 4 frames between actions
+            repeat_action_probability=0.0,  # Disable sticky actions
+            full_action_space=False  # Use minimal action space
+        )
+        
+        # Store action space size for the agent
+        self.action_space = self.env.action_space
+        self.observation_space = gym.spaces.Box(
+            low=0, high=255, shape=(84, 84), dtype=np.uint8
+        )
+    
+    def preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
+        """Convert RGB observation to 84x84 grayscale."""
+        # Convert to grayscale
+        gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+        
+        # Resize to 84x84
+        resized = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
+        
+        return resized
+    
+    def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Reset the environment and return initial observation."""
+        obs, info = self.env.reset()
+        processed_obs = self.preprocess_observation(obs)
+        return processed_obs, info
+    
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+        """Take a step in the environment."""
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        processed_obs = self.preprocess_observation(obs)
+        return processed_obs, reward, terminated, truncated, info
+    
+    def close(self):
+        """Close the environment."""
+        self.env.close() 
