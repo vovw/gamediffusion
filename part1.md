@@ -77,12 +77,18 @@ data/
   - Frame skipping (4 frames)
   - Minimal action space
 - **RandomAgent**: Agent that selects random actions, records frames, actions, and rewards, and saves them to disk as PNGs and JSON.
-- **Test Suite**: Comprehensive pytest-based tests for environment and agent, including data recording and episode execution.
+- **DQNAgent**: Deep Q-Network agent implemented in PyTorch, including:
+  - 3-layer CNN + 2 fully connected layers for Q-value prediction
+  - Experience replay buffer (capacity 100,000)
+  - Target network and synchronization logic
+  - Epsilon-greedy action selection
+  - Modular, test-driven design
+- **Test Suite**: Comprehensive pytest-based tests for environment, agents (random and DQN), replay buffer, target network sync, and epsilon-greedy policy.
 - **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
 
 ### Remaining tasks
-- Implement DQN agent (CNN architecture, experience replay, target network, etc.)
-- Train agent to different skill levels and save checkpoints
+- Implement DQN training step (optimize_model) and full training loop
+- Train DQN agent to different skill levels and save checkpoints
 - Record and organize gameplay data for each skill level (as described below)
 - Create validation splits for evaluation
 - Integrate experiment tracking (e.g., with WandB)
