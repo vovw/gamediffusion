@@ -204,16 +204,16 @@ def main():
                 # Save checkpoint
                 torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth'))
                 skill_level += 1
-        # Periodic checkpoint
+        # Periodic checkpoint (overwrite previous)
         if episode % config['save_freq'] == 0:
-            torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], f'dqn_ep{episode}.pth'))
+            torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], 'dqn_latest.pth'))
         # Early stop if all skill levels collected
         if skill_level >= len(skill_thresholds):
             print("All skill levels collected. Training complete.")
             break
     env.close()
-    # Save final checkpoint
-    torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], 'dqn_final.pth'))
+    # Save final checkpoint (overwrite previous)
+    torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], 'dqn_latest.pth'))
     print("Training finished.")
 
 if __name__ == '__main__':
