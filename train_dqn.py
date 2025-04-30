@@ -7,6 +7,7 @@ from dqn_agent import DQNAgent
 import cv2
 import json
 import random
+import argparse
 
 # Config
 config = {
@@ -15,7 +16,7 @@ config = {
     'state_shape': (4, 84, 84),
     'max_episodes': 10000,
     'max_steps': 10000,
-    'epsilon_start': 1.0,
+    'epsilon_start': 0.25,
     'epsilon_end': 0.1,
     'epsilon_decay': 1000000,  # steps
     'target_update_freq': 1000,  # steps
@@ -79,6 +80,19 @@ def evaluate_agent(agent, env, n_episodes=10):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--max_episodes', type=int, default=None)
+    parser.add_argument('--min_buffer', type=int, default=None)
+    parser.add_argument('--save_freq', type=int, default=None)
+    parser.add_argument('--no_save', action='store_true', help='Do not save frames or actions during training')
+    args = parser.parse_args()
+    # Override config if args provided
+    if args.max_episodes is not None:
+        config['max_episodes'] = args.max_episodes
+    if args.min_buffer is not None:
+        config['min_buffer'] = args.min_buffer
+    if args.save_freq is not None:
+        config['save_freq'] = args.save_freq
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['data_dir'], exist_ok=True)
     os.makedirs(config['actions_dir'], exist_ok=True)
@@ -93,12 +107,14 @@ def main():
     skill_thresholds = config['skill_thresholds']
     skill_counts = [0] * len(skill_thresholds)
     pbar = trange(config['max_episodes'], desc='Training')
+    episode_losses = []
     for episode in pbar:
         obs, info = env.reset()
         state_stack = np.stack([obs] * 4, axis=0)
         frames, actions, rewards = [obs], [], []
         done = False
         total_reward = 0
+        losses = []
         for step in range(config['max_steps']):
             action = agent.select_action(state_stack, epsilon)
             next_obs, reward, terminated, truncated, info = env.step(action)
@@ -106,6 +122,8 @@ def main():
             next_state_stack[-1] = next_obs
             agent.replay_buffer.push(state_stack, action, reward, next_state_stack, terminated or truncated)
             loss = agent.optimize_model() if total_steps > config['min_buffer'] else None
+            if loss is not None:
+                losses.append(loss)
             state_stack = next_state_stack
             frames.append(next_obs)
             actions.append(action)
@@ -120,11 +138,20 @@ def main():
                 agent.update_target_network()
             if terminated or truncated:
                 break
+        avg_loss = np.mean(losses) if losses else 0.0
         episode_rewards.append(total_reward)
+        episode_losses.append(avg_loss)
         # Logging
-        pbar.set_postfix({'ep_reward': total_reward, 'epsilon': epsilon, 'skill': skill_level})
+        pbar.set_postfix({'ep_reward': total_reward, 'epsilon': epsilon, 'skill': skill_level, 'loss': avg_loss})
+        # Print running averages every 10 episodes
+        if episode > 0 and episode % 10 == 0:
+            last_10_loss = episode_losses[-10:]
+            last_10_reward = episode_rewards[-10:]
+            print(f"[Stats] Episodes {episode-9}-{episode} | Avg Reward: {np.mean(last_10_reward):.2f} | Avg Loss: {np.mean(last_10_loss):.4f}")
         # Save episode data if in skill collection phase
-        if skill_level < len(skill_thresholds) and total_reward >= skill_thresholds[skill_level]:
+        if (not args.no_save and
+            skill_level < len(skill_thresholds) and
+            total_reward >= skill_thresholds[skill_level]):
             if skill_counts[skill_level] < config['episodes_per_skill']:
                 save_episode_data(frames, actions, rewards, skill_level, skill_counts[skill_level]+1, config)
                 skill_counts[skill_level] += 1

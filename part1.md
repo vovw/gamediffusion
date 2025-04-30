@@ -83,9 +83,13 @@ data/
   - Target network and synchronization logic
   - Epsilon-greedy action selection
   - Modular, test-driven design
-  - **DQN training step (optimize_model) and full training loop implemented and tested**
+  - DQN training step (optimize_model) and full training loop
+  - Proper device selection (CUDA/MPS/CPU) and torch.compile for speed
 - **Training Script**: `train_dqn.py` implements the full DQN training loop, including:
   - Epsilon decay, target network updates, and checkpointing
+  - Command-line overrides for max_episodes, min_buffer, save_freq, and no_save (for flexible runs)
+  - Loss logging: average loss per episode, running stats for last 10 episodes, and reward tracking
+  - Option to skip saving frames/actions for dry runs (`--no_save`)
   - Saving model checkpoints at skill milestones (random, ~50, ~150, ~250 points average)
   - Recording gameplay data (frames, actions, rewards) for each skill level as PNGs and JSON
   - Progress bar and logging
@@ -93,8 +97,8 @@ data/
 - **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
 
 ### Remaining tasks
-- Train DQN agent to different skill levels and save checkpoints
-- Record and organize gameplay data for each skill level (as described below)
+- Train DQN agent to different skill levels and save checkpoints (full run with data saving enabled)
+- Record and organize gameplay data for each skill level (as described above)
 - Create validation splits for evaluation
 - Integrate experiment tracking (e.g., with WandB)
 
