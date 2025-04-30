@@ -80,21 +80,35 @@ data/
 - **DQNAgent**: Deep Q-Network agent implemented in PyTorch, including:
   - 3-layer CNN + 2 fully connected layers for Q-value prediction
   - Experience replay buffer (capacity 100,000)
-  - Target network and synchronization logic
-  - Epsilon-greedy action selection
+  - Double DQN implementation to reduce Q-value overestimation
+  - HuberLoss for more robust learning
+  - Target network and synchronization logic (every 500 steps)
+  - Epsilon-greedy action selection with improved exploration (1.0 to 0.1)
+  - Optimized hyperparameters: learning rate 2.5e-4, batch size 64
+  - Proper gradient clipping (1.0) for stable training
   - Modular, test-driven design
   - DQN training step (optimize_model) and full training loop
   - Proper device selection (CUDA/MPS/CPU) and torch.compile for speed
 - **Training Script**: `train_dqn.py` implements the full DQN training loop, including:
-  - Epsilon decay, target network updates, and checkpointing
+  - Pre-filling of replay buffer with random experiences
+  - Multiple optimization steps per environment step (10x)
+  - Epsilon decay with faster schedule (200k steps)
+  - Target network updates, and checkpointing
+  - Running average reward tracking for skill level determination
   - Command-line overrides for max_episodes, min_buffer, save_freq, and no_save (for flexible runs)
   - Loss logging: average loss per episode, running stats for last 10 episodes, and reward tracking
   - Option to skip saving frames/actions for dry runs (`--no_save`)
   - Saving model checkpoints at skill milestones (random, ~50, ~150, ~250 points average)
   - Recording gameplay data (frames, actions, rewards) for each skill level as PNGs and JSON
-  - Progress bar and logging
+  - Progress bar and improved logging with formatted metrics
 - **Test Suite**: Comprehensive pytest-based tests for environment, agents (random and DQN), replay buffer, target network sync, epsilon-greedy policy, and DQN training/optimization.
 - **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
+- **DQN Training Optimizations**: Implemented various techniques to accelerate learning:
+  - Double Q-learning to reduce overestimation bias
+  - Increased learning rate and batch size
+  - More frequent optimization steps
+  - Pre-filling of replay buffer
+  - Better exploration strategy
 
 ### Remaining tasks
 - Train DQN agent to different skill levels and save checkpoints (full run with data saving enabled)

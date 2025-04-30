@@ -74,8 +74,8 @@ class DQNAgent:
         self.target_net = DQNCNN(state_shape, n_actions)
         self.replay_buffer = ReplayBuffer(capacity=100000)
         self.gamma = 0.99
-        self.batch_size = 32
-        self.learning_rate = 1e-4
+        self.batch_size = 64
+        self.learning_rate = 2.5e-4
         # Device selection
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -131,18 +131,20 @@ class DQNAgent:
         with torch.cuda.amp.autocast(enabled=(scaler is not None)):
             q_values = self.policy_net(states).gather(1, actions)  # (B, 1)
             with torch.no_grad():
-                next_q_values = self.target_net(next_states).max(1, keepdim=True)[0]
+                # Double DQN: Use policy net to select actions, target net to evaluate them
+                next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]
+                next_q_values = self.target_net(next_states).gather(1, next_actions)
                 target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
-            loss = nn.MSELoss()(q_values, target_q)
+            loss = nn.HuberLoss()(q_values, target_q)  # Changed from MSE to Huber loss
         self.optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)  # From 10 to 1.0
             scaler.step(self.optimizer)
             scaler.update()
         else:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)  # From 10 to 1.0
             self.optimizer.step()
         return loss.item()
 
