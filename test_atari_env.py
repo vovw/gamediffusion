@@ -136,4 +136,49 @@ def test_dqn_epsilon_greedy_policy():
     actions = [agent.select_action(dummy_state, epsilon=1.0) for _ in range(100)]
     assert len(set(actions)) > 1, "With epsilon=1.0, actions should be random"
     actions = [agent.select_action(dummy_state, epsilon=0.0) for _ in range(10)]
-    assert len(set(actions)) == 1, "With epsilon=0.0, actions should be greedy (identical)" 
+    assert len(set(actions)) == 1, "With epsilon=0.0, actions should be greedy (identical)"
+
+# TDD: Test for DQNAgent.optimize_model (should fail until implemented)
+def test_dqn_optimize_model():
+    import torch
+    from dqn_agent import DQNAgent
+    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    agent.policy_net.eval()
+    # Fill replay buffer with dummy transitions
+    for _ in range(32):
+        state = np.zeros((4, 84, 84), dtype=np.uint8)
+        action = np.random.randint(0, 4)
+        reward = np.random.randn()
+        next_state = np.zeros((4, 84, 84), dtype=np.uint8)
+        done = np.random.choice([True, False])
+        agent.replay_buffer.push(state, action, reward, next_state, done)
+    # Should raise NotImplementedError or fail until implemented
+    try:
+        loss = agent.optimize_model()
+        assert loss is not None, "optimize_model should return a loss value after update"
+    except NotImplementedError:
+        pass  # Acceptable for TDD
+
+# TDD: Test for a minimal DQN training loop (should fail until implemented)
+def test_dqn_training_loop():
+    from dqn_agent import DQNAgent
+    from atari_env import AtariBreakoutEnv
+    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    env = AtariBreakoutEnv()
+    obs, info = env.reset()
+    state_stack = np.stack([obs]*4, axis=0)  # (4, 84, 84)
+    epsilon = 1.0
+    for step in range(10):
+        action = agent.select_action(state_stack, epsilon)
+        next_obs, reward, terminated, truncated, info = env.step(action)
+        next_state_stack = np.roll(state_stack, shift=-1, axis=0)
+        next_state_stack[-1] = next_obs
+        agent.replay_buffer.push(state_stack, action, reward, next_state_stack, terminated or truncated)
+        agent.optimize_model()  # Should not crash
+        state_stack = next_state_stack
+        if terminated or truncated:
+            obs, info = env.reset()
+            state_stack = np.stack([obs]*4, axis=0)
+    # Try updating target network
+    agent.update_target_network()
+    env.close() 

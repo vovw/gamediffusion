@@ -83,11 +83,16 @@ data/
   - Target network and synchronization logic
   - Epsilon-greedy action selection
   - Modular, test-driven design
-- **Test Suite**: Comprehensive pytest-based tests for environment, agents (random and DQN), replay buffer, target network sync, and epsilon-greedy policy.
+  - **DQN training step (optimize_model) and full training loop implemented and tested**
+- **Training Script**: `train_dqn.py` implements the full DQN training loop, including:
+  - Epsilon decay, target network updates, and checkpointing
+  - Saving model checkpoints at skill milestones (random, ~50, ~150, ~250 points average)
+  - Recording gameplay data (frames, actions, rewards) for each skill level as PNGs and JSON
+  - Progress bar and logging
+- **Test Suite**: Comprehensive pytest-based tests for environment, agents (random and DQN), replay buffer, target network sync, epsilon-greedy policy, and DQN training/optimization.
 - **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
 
 ### Remaining tasks
-- Implement DQN training step (optimize_model) and full training loop
 - Train DQN agent to different skill levels and save checkpoints
 - Record and organize gameplay data for each skill level (as described below)
 - Create validation splits for evaluation

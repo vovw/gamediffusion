@@ -73,7 +73,22 @@ class DQNAgent:
         self.policy_net = DQNCNN(state_shape, n_actions)
         self.target_net = DQNCNN(state_shape, n_actions)
         self.replay_buffer = ReplayBuffer(capacity=100000)
-        # Optimizer, device, etc. (to be implemented)
+        self.gamma = 0.99
+        self.batch_size = 32
+        self.learning_rate = 1e-4
+        # Device selection
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
+        self.policy_net.to(self.device)
+        self.target_net.to(self.device)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
+        # Compile for speed if available and on CUDA only
+        if hasattr(torch, 'compile') and self.device.type == 'cuda':
+            self.policy_net = torch.compile(self.policy_net)
 
     def select_action(self, state, epsilon: float) -> int:
         """Select action using epsilon-greedy policy."""
@@ -99,7 +114,37 @@ class DQNAgent:
 
     def optimize_model(self):
         """Sample from replay buffer and optimize policy network."""
-        pass
+        if len(self.replay_buffer) < self.batch_size:
+            return None
+        batch = self.replay_buffer.sample(self.batch_size)
+        # Unpack batch
+        states, actions, rewards, next_states, dones = zip(*batch)
+        # Convert to tensors
+        states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 4, 84, 84)
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)  # (B, 1)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
+        next_states = torch.from_numpy(np.stack(next_states)).to(self.device).float() / 255.0
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
+        self.policy_net.train()
+        # Mixed precision if CUDA
+        scaler = torch.cuda.amp.GradScaler() if self.device.type == 'cuda' else None
+        with torch.cuda.amp.autocast(enabled=(scaler is not None)):
+            q_values = self.policy_net(states).gather(1, actions)  # (B, 1)
+            with torch.no_grad():
+                next_q_values = self.target_net(next_states).max(1, keepdim=True)[0]
+                target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
+            loss = nn.MSELoss()(q_values, target_q)
+        self.optimizer.zero_grad()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
+            scaler.step(self.optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
+            self.optimizer.step()
+        return loss.item()
 
     def update_target_network(self):
         """Copy policy network weights to target network."""
