@@ -18,8 +18,8 @@ config = {
     'max_steps': 10000,
     'epsilon_start': 1.0,
     'epsilon_end': 0.1,
-    'epsilon_decay': 200000,
-    'target_update_freq': 500,
+    'epsilon_decay': 50000,
+    'target_update_freq': 100,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -144,7 +144,7 @@ def main():
             agent.replay_buffer.push(state_stack, action, reward, next_state_stack, terminated or truncated)
             
             # Do multiple optimization steps per environment step
-            for _ in range(10):  # Increased optimization frequency
+            for _ in range(5):  # Increased optimization frequency
                 loss = agent.optimize_model()
                 if loss is not None:
                     losses.append(loss)

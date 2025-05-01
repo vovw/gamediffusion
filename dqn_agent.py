@@ -74,8 +74,8 @@ class DQNAgent:
         self.target_net = DQNCNN(state_shape, n_actions)
         self.replay_buffer = ReplayBuffer(capacity=100000)
         self.gamma = 0.99
-        self.batch_size = 64
-        self.learning_rate = 2.5e-4
+        self.batch_size = 128
+        self.learning_rate = 3e-4
         # Device selection
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
