@@ -19,10 +19,16 @@ Usage:
     # Save to different directory
     python record_videos.py --skill_level 2 --output_dir videos_skill2
 
+    # Control exploration rate of trained agent
+    python record_videos.py --epsilon 0.1  # 10% random actions
+    python record_videos.py --skill_level 2 --epsilon 0.2  # 20% random actions with skill level 2
+
 Arguments:
     --num_episodes: Number of episodes to record for each agent (default: 5)
     --output_dir: Directory to save videos (default: 'videos')
     --skill_level: Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.
+    --epsilon: Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore). Default: 0.0
+    --no_sync: Set to True to use a non-synced directory for video output (default: False)
 
 Output:
     - Random agent videos: random_agent_episode_X.mp4
@@ -39,6 +45,9 @@ from dqn_agent import DQNAgent
 from random_agent import RandomAgent
 import gymnasium as gym
 import argparse
+import time
+import shutil
+import tempfile
 
 def add_text_overlay(frame, frame_num, action, cumulative_reward):
     """Add text overlay to frame with game information."""
@@ -48,7 +57,7 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward):
     
     # Create a slightly larger frame to accommodate text
     height, width = frame.shape[:2]
-    text_height = 30
+    text_height = 20  # Reduced from 30 to 20
     frame_with_text = np.zeros((height + text_height, width, 3), dtype=np.uint8)
     frame_with_text[text_height:, :, :] = frame
     
@@ -58,7 +67,7 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward):
     # Add text
     action_names = ['NOOP', 'FIRE', 'RIGHT', 'LEFT']
     text = f"{frame_num} | {action_names[action]} | {cumulative_reward:.1f}"
-    cv2.putText(frame_with_text, text, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(frame_with_text, text, (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     
     return frame_with_text
 
@@ -78,6 +87,10 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
         # Get raw frame from environment (before preprocessing)
         raw_frame = env.env.render()  # This gets the 160x210 RGB frame
         
+        if raw_frame is None or raw_frame.size == 0:
+            print("Warning: Received empty frame from environment. Skipping frame.")
+            continue
+            
         # Get action from agent
         if isinstance(agent, DQNAgent):
             action = agent.select_action(state_stack, epsilon)
@@ -86,7 +99,8 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
         
         # Add overlay and write frame
         frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
-        video_writer.write(frame_with_overlay)
+        if frame_with_overlay is not None:
+            video_writer.write(frame_with_overlay)
         
         # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -101,13 +115,14 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
         if terminated or truncated:
             # Write final frame
             raw_frame = env.env.render()
-            frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
-            video_writer.write(frame_with_overlay)
+            if raw_frame is not None and raw_frame.size > 0:
+                frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
+                video_writer.write(frame_with_overlay)
             break
     
     return cumulative_reward
 
-def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None):
+def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None, epsilon=0.0, no_sync=False):
     """Record gameplay videos for both random and trained agents.
     
     Args:
@@ -115,8 +130,19 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
         output_dir: Directory to save videos
         skill_level: If specified (0-3), load that skill level's checkpoint.
                     If None, use latest checkpoint.
+        epsilon: Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore)
+        no_sync: If True, use a temporary directory and copy files to output_dir after completion
     """
-    os.makedirs(output_dir, exist_ok=True)
+    # Use a temporary directory if no_sync is True
+    temp_dir = None
+    working_dir = output_dir
+    
+    if no_sync:
+        temp_dir = tempfile.mkdtemp()
+        working_dir = temp_dir
+        print(f"Using temporary directory: {temp_dir}")
+    else:
+        os.makedirs(output_dir, exist_ok=True)
     
     # Create environment
     env = AtariBreakoutEnv()
@@ -142,28 +168,115 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
     
     # Video writer settings
     fps = 30
-    frame_size = (160, 240)  # 160x210 plus space for text overlay
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    frame_size = (160, 230)  # 160x210 plus space for text overlay
+    
+    # Try different codecs in order of preference
+    codecs = [
+        ('mp4v', '.mp4'),  # MPEG-4 codec
+        ('avc1', '.mp4'),  # H.264 codec
+        ('XVID', '.avi'),  # XVID codec
+        ('MJPG', '.avi')   # Motion JPEG
+    ]
+    
+    # Select a working codec
+    working_codec = None
+    for codec, ext in codecs:
+        try:
+            test_path = os.path.join(working_dir, f'test{ext}')
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            test_writer = cv2.VideoWriter(test_path, fourcc, fps, frame_size)
+            
+            # Create a dummy frame and write it
+            dummy_frame = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
+            test_writer.write(dummy_frame)
+            test_writer.release()
+            
+            # Check if file exists and has content
+            if os.path.exists(test_path) and os.path.getsize(test_path) > 1000:
+                working_codec = (codec, ext)
+                os.remove(test_path)
+                break
+            
+            if os.path.exists(test_path):
+                os.remove(test_path)
+                
+        except Exception as e:
+            print(f"Codec {codec} failed: {str(e)}")
+    
+    if working_codec is None:
+        print("Error: Could not find a working video codec.")
+        return
+        
+    print(f"Using codec: {working_codec[0]} with extension {working_codec[1]}")
+    fourcc = cv2.VideoWriter_fourcc(*working_codec[0])
+    file_ext = working_codec[1]
     
     # Record random agent episodes
     print("Recording random agent episodes...")
     for episode in range(num_episodes):
-        video_path = os.path.join(output_dir, f'random_agent_episode_{episode+1}.mp4')
+        video_path = os.path.join(working_dir, f'random_agent_episode_{episode+1}{file_ext}')
         video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
+        
+        if not video_writer.isOpened():
+            print(f"Error: Could not open video writer for {video_path}")
+            continue
+            
         reward = record_episode(env, random_agent, video_writer)
+        
+        # Explicitly release and let OS finish writing
         video_writer.release()
-        print(f"Random Agent Episode {episode+1} - Score: {reward}")
+        time.sleep(0.5)  # Give OS time to finish writing
+        
+        # Verify file size
+        file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
+        print(f"Random Agent Episode {episode+1} - Score: {reward} - Video size: {file_size} bytes")
+        
+        if file_size < 1000:
+            print(f"Warning: Video file may be corrupted (small size): {video_path}")
     
     # Record trained agent episodes
     print(f"\nRecording trained agent episodes (checkpoint: {checkpoint_name})...")
     for episode in range(num_episodes):
-        video_path = os.path.join(output_dir, f'trained_agent_{checkpoint_name}_episode_{episode+1}.mp4')
+        video_path = os.path.join(working_dir, f'trained_agent_{checkpoint_name}_episode_{episode+1}{file_ext}')
         video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
-        reward = record_episode(env, dqn_agent, video_writer, epsilon=0.0)
+        
+        if not video_writer.isOpened():
+            print(f"Error: Could not open video writer for {video_path}")
+            continue
+            
+        reward = record_episode(env, dqn_agent, video_writer, epsilon=epsilon)
+        
+        # Explicitly release and let OS finish writing
         video_writer.release()
-        print(f"Trained Agent Episode {episode+1} - Score: {reward}")
+        time.sleep(0.5)  # Give OS time to finish writing
+        
+        # Verify file size
+        file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
+        print(f"Trained Agent Episode {episode+1} - Score: {reward} - Video size: {file_size} bytes")
+        
+        if file_size < 1000:
+            print(f"Warning: Video file may be corrupted (small size): {video_path}")
     
     env.close()
+    
+    # If using temporary directory, copy files to the output directory
+    if no_sync:
+        print(f"\nCopying files from temporary directory to {output_dir}...")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for filename in os.listdir(temp_dir):
+            src_path = os.path.join(temp_dir, filename)
+            dst_path = os.path.join(output_dir, filename)
+            
+            if os.path.getsize(src_path) > 1000:  # Only copy files that have content
+                shutil.copy2(src_path, dst_path)
+                print(f"Copied: {filename} ({os.path.getsize(dst_path)} bytes)")
+            else:
+                print(f"Skipped corrupted file: {filename}")
+                
+        # Clean up temporary directory
+        shutil.rmtree(temp_dir)
+    
     print("\nAll videos recorded successfully!")
 
 if __name__ == '__main__':
@@ -171,10 +284,14 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', type=int, default=5, help='Number of episodes to record for each agent')
     parser.add_argument('--output_dir', type=str, default='videos', help='Directory to save videos')
     parser.add_argument('--skill_level', type=int, choices=[0,1,2,3], help='Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.')
+    parser.add_argument('--epsilon', type=float, default=0.0, help='Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore)')
+    parser.add_argument('--no_sync', action='store_true', help='Use a temporary directory to avoid iCloud sync issues')
     args = parser.parse_args()
     
     record_gameplay_videos(
         num_episodes=args.num_episodes,
         output_dir=args.output_dir,
-        skill_level=args.skill_level
-    ) 
+        skill_level=args.skill_level,
+        epsilon=args.epsilon,
+        no_sync=args.no_sync
+    )
