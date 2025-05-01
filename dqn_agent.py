@@ -108,6 +108,8 @@ class DQNAgent:
                 state_tensor = state_tensor.cpu()
                 self.policy_net.cpu()
             
+            # Set model to eval mode for inference
+            self.policy_net.eval()
             with torch.no_grad():
                 q_values = self.policy_net(state_tensor)
                 # Normalize Q-values to prevent any action from dominating

@@ -18,13 +18,13 @@ config = {
     'max_steps': 10000,
     'epsilon_start': 1.0,
     'epsilon_end': 0.05,
-    'epsilon_decay': 100000,
+    'epsilon_decay': 10000,
     'target_update_freq': 100,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
-    'save_freq': 100,
-    'min_buffer': 50000,
+    'save_freq': 10,
+    'min_buffer': 10000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -202,18 +202,39 @@ def main():
             if skill_counts[skill_level] >= config['episodes_per_skill']:
                 print(f"Skill level {skill_level} ({skill_thresholds[skill_level]}+) complete.")
                 # Save checkpoint
-                torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth'))
+                checkpoint_path = os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth')
+                torch.save(agent.policy_net.state_dict(), checkpoint_path)
+                # Print parameter stats
+                param_count = sum(p.numel() for p in agent.policy_net.parameters())
+                param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
+                print(f"Saved model to {checkpoint_path}")
+                print(f"Parameter count: {param_count:,}")
+                print(f"Parameter sum: {param_sum:.2f}")
                 skill_level += 1
         # Periodic checkpoint (overwrite previous)
         if episode % config['save_freq'] == 0:
-            torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], 'dqn_latest.pth'))
+            checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
+            torch.save(agent.policy_net.state_dict(), checkpoint_path)
+            # Print parameter stats
+            param_count = sum(p.numel() for p in agent.policy_net.parameters())
+            param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
+            print(f"\nSaved checkpoint to {checkpoint_path}")
+            print(f"Parameter count: {param_count:,}")
+            print(f"Parameter sum: {param_sum:.2f}\n")
         # Early stop if all skill levels collected
         if skill_level >= len(skill_thresholds):
             print("All skill levels collected. Training complete.")
             break
     env.close()
     # Save final checkpoint (overwrite previous)
-    torch.save(agent.policy_net.state_dict(), os.path.join(config['checkpoint_dir'], 'dqn_latest.pth'))
+    checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
+    torch.save(agent.policy_net.state_dict(), checkpoint_path)
+    # Print parameter stats
+    param_count = sum(p.numel() for p in agent.policy_net.parameters())
+    param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
+    print(f"\nSaved final model to {checkpoint_path}")
+    print(f"Parameter count: {param_count:,}")
+    print(f"Parameter sum: {param_sum:.2f}")
     print("Training finished.")
 
 if __name__ == '__main__':

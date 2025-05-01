@@ -19,6 +19,9 @@ class AtariBreakoutEnv:
         
         # Store action space size for the agent
         self.action_space = self.env.action_space
+        print(f"Action space: {self.action_space}")
+        print(f"Action meanings: {self.env.unwrapped.get_action_meanings()}")
+        
         self.observation_space = gym.spaces.Box(
             low=0, high=255, shape=(84, 84), dtype=np.uint8
         )

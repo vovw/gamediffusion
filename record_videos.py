@@ -1,3 +1,35 @@
+"""Record gameplay videos of trained and random agents playing Breakout.
+
+This script records videos of both a random agent and a trained DQN agent playing Atari Breakout.
+Videos include an overlay showing frame number, action taken, and current score.
+
+Usage:
+    # Record using latest checkpoint (default)
+    python record_videos.py
+
+    # Record using specific skill level checkpoints
+    python record_videos.py --skill_level 0  # Random play
+    python record_videos.py --skill_level 1  # ~50 points skill
+    python record_videos.py --skill_level 2  # ~150 points skill
+    python record_videos.py --skill_level 3  # ~250 points skill
+
+    # Record more episodes
+    python record_videos.py --skill_level 2 --num_episodes 10
+
+    # Save to different directory
+    python record_videos.py --skill_level 2 --output_dir videos_skill2
+
+Arguments:
+    --num_episodes: Number of episodes to record for each agent (default: 5)
+    --output_dir: Directory to save videos (default: 'videos')
+    --skill_level: Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.
+
+Output:
+    - Random agent videos: random_agent_episode_X.mp4
+    - Trained agent videos: trained_agent_[checkpoint]_episode_X.mp4
+    where [checkpoint] is either 'latest' or 'skill_N' depending on --skill_level
+"""
+
 import os
 import cv2
 import numpy as np
@@ -6,6 +38,7 @@ from atari_env import AtariBreakoutEnv
 from dqn_agent import DQNAgent
 from random_agent import RandomAgent
 import gymnasium as gym
+import argparse
 
 def add_text_overlay(frame, frame_num, action, cumulative_reward):
     """Add text overlay to frame with game information."""
@@ -70,30 +103,38 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
     
     return cumulative_reward
 
-def record_gameplay_videos(num_episodes=5, output_dir='videos'):
-    """Record gameplay videos for both random and trained agents."""
+def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None):
+    """Record gameplay videos for both random and trained agents.
+    
+    Args:
+        num_episodes: Number of episodes to record for each agent
+        output_dir: Directory to save videos
+        skill_level: If specified (0-3), load that skill level's checkpoint.
+                    If None, use latest checkpoint.
+    """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create environment with rendering
-    env = gym.make(
-        "ALE/Breakout-v5",
-        render_mode='rgb_array',
-        frameskip=4,
-        repeat_action_probability=0.0,
-        full_action_space=False
-    )
-    env = AtariBreakoutEnv()  # Wrap it with our preprocessor
+    # Create environment
+    env = AtariBreakoutEnv()
     
     # Initialize agents
     random_agent = RandomAgent(n_actions=4)
     dqn_agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
     
     # Load trained model if available
-    model_path = os.path.join('checkpoints', 'dqn_latest.pth')
+    if skill_level is not None:
+        model_path = os.path.join('checkpoints', f'dqn_skill_{skill_level}.pth')
+        checkpoint_name = f'skill_{skill_level}'
+    else:
+        model_path = os.path.join('checkpoints', 'dqn_latest.pth')
+        checkpoint_name = 'latest'
+        
     if os.path.exists(model_path):
         dqn_agent.policy_net.load_state_dict(torch.load(model_path))
         dqn_agent.policy_net.eval()
-        print(f"Model loaded. Device: {next(dqn_agent.policy_net.parameters()).device}")
+        print(f"Model loaded from {model_path}. Device: {next(dqn_agent.policy_net.parameters()).device}")
+    else:
+        print(f"Warning: No checkpoint found at {model_path}, using untrained model")
     
     # Video writer settings
     fps = 30
@@ -110,9 +151,9 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos'):
         print(f"Random Agent Episode {episode+1} - Score: {reward}")
     
     # Record trained agent episodes
-    print("\nRecording trained agent episodes...")
+    print(f"\nRecording trained agent episodes (checkpoint: {checkpoint_name})...")
     for episode in range(num_episodes):
-        video_path = os.path.join(output_dir, f'trained_agent_episode_{episode+1}.mp4')
+        video_path = os.path.join(output_dir, f'trained_agent_{checkpoint_name}_episode_{episode+1}.mp4')
         video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
         reward = record_episode(env, dqn_agent, video_writer, epsilon=0.0)
         video_writer.release()
@@ -122,4 +163,14 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos'):
     print("\nAll videos recorded successfully!")
 
 if __name__ == '__main__':
-    record_gameplay_videos() 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num_episodes', type=int, default=5, help='Number of episodes to record for each agent')
+    parser.add_argument('--output_dir', type=str, default='videos', help='Directory to save videos')
+    parser.add_argument('--skill_level', type=int, choices=[0,1,2,3], help='Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.')
+    args = parser.parse_args()
+    
+    record_gameplay_videos(
+        num_episodes=args.num_episodes,
+        output_dir=args.output_dir,
+        skill_level=args.skill_level
+    ) 
