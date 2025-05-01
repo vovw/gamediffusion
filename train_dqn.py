@@ -16,15 +16,15 @@ config = {
     'state_shape': (4, 84, 84),
     'max_episodes': 20000,
     'max_steps': 10000,
-    'epsilon_start': 0.0,
-    'epsilon_end': 0.0,
-    'epsilon_decay': 10000,
+    'epsilon_start': 1.0,
+    'epsilon_end': 0.05,
+    'epsilon_decay': 20000,
     'target_update_freq': 100,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
     'save_freq': 10,
-    'min_buffer': 1000,
+    'min_buffer': 50000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -208,6 +208,7 @@ def main():
                 param_count = sum(p.numel() for p in agent.policy_net.parameters())
                 param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
                 print(f"Saved model to {checkpoint_path}")
+
                 skill_level += 1
         # Periodic checkpoint (overwrite previous)
         if episode % config['save_freq'] == 0:
