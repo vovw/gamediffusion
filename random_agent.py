@@ -5,15 +5,23 @@ import os
 import cv2
 
 class RandomAgent:
-    """Agent that takes random actions in the Atari environment."""
+    """Agent that selects random actions."""
     
     def __init__(self, n_actions: int):
-        """Initialize the agent with the number of possible actions."""
+        """Initialize the random agent.
+        
+        Args:
+            n_actions: Number of possible actions
+        """
         self.n_actions = n_actions
         self.transitions = []  # Store transitions for the current episode
     
     def select_action(self) -> int:
-        """Select a random action."""
+        """Select a random action.
+        
+        Returns:
+            int: Random action index
+        """
         return np.random.randint(0, self.n_actions)
     
     def record_transition(self, frame: np.ndarray, action: int, reward: float, 

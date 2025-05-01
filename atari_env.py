@@ -11,7 +11,7 @@ class AtariBreakoutEnv:
         # Create the base Atari environment with specific settings
         self.env = gym.make(
             "ALE/Breakout-v5",
-            render_mode=None,  # No rendering by default
+            render_mode='rgb_array',  # Enable rgb_array rendering
             frameskip=4,  # Skip 4 frames between actions
             repeat_action_probability=0.0,  # Disable sticky actions
             full_action_space=False  # Use minimal action space

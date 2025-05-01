@@ -3,3 +3,4 @@ atari/
 __pycache__/
 data/
 checkpoints/
+videos/
