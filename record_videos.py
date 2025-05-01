@@ -57,7 +57,7 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward):
     
     # Add text
     action_names = ['NOOP', 'FIRE', 'RIGHT', 'LEFT']
-    text = f"Frame: {frame_num} | Action: {action_names[action]} | Score: {cumulative_reward:.1f}"
+    text = f"{frame_num} | {action_names[action]} | {cumulative_reward:.1f}"
     cv2.putText(frame_with_text, text, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
     return frame_with_text
@@ -69,8 +69,12 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
     state_stack = np.stack([obs] * 4, axis=0)
     cumulative_reward = 0
     frame_num = 0
+    max_steps = 10000
     
     while True:
+        if frame_num > max_steps:
+            break
+        
         # Get raw frame from environment (before preprocessing)
         raw_frame = env.env.render()  # This gets the 160x210 RGB frame
         
