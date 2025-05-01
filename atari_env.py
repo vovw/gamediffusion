@@ -31,7 +31,7 @@ class AtariBreakoutEnv:
         self.was_real_done = True  # Track if the episode was actually done
         
         # Living penalty configuration
-        self.living_penalty = -0.03  # Small negative reward per time step
+        self.living_penalty = -0.001  # Small negative reward per time step
     
     def preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Convert RGB observation to 84x84 grayscale."""
