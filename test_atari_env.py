@@ -143,9 +143,8 @@ def test_dqn_optimize_model():
     import torch
     from dqn_agent import DQNAgent
     agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
-    agent.policy_net.eval()
     # Fill replay buffer with dummy transitions
-    for _ in range(32):
+    for _ in range(128):  # Match the agent's batch_size
         state = np.zeros((4, 84, 84), dtype=np.uint8)
         action = np.random.randint(0, 4)
         reward = np.random.randn()

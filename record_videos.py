@@ -93,6 +93,7 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos'):
     if os.path.exists(model_path):
         dqn_agent.policy_net.load_state_dict(torch.load(model_path))
         dqn_agent.policy_net.eval()
+        print(f"Model loaded. Device: {next(dqn_agent.policy_net.parameters()).device}")
     
     # Video writer settings
     fps = 30

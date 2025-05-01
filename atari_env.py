@@ -23,9 +23,12 @@ class AtariBreakoutEnv:
             low=0, high=255, shape=(84, 84), dtype=np.uint8
         )
         
-        # Track lives for auto-fire
+        # Track lives for monitoring
         self.lives = 5  # Breakout starts with 5 lives
         self.was_real_done = True  # Track if the episode was actually done
+        
+        # Living penalty configuration
+        self.living_penalty = -0.03  # Small negative reward per time step
     
     def preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Convert RGB observation to 84x84 grayscale."""
@@ -42,9 +45,6 @@ class AtariBreakoutEnv:
         obs, info = self.env.reset()
         self.lives = info.get('lives', 5)  # Get initial lives
         
-        # Fire to start game
-        obs, _, _, _, info = self.env.step(1)  # 1 is FIRE action
-        
         processed_obs = self.preprocess_observation(obs)
         return processed_obs, info
     
@@ -57,11 +57,12 @@ class AtariBreakoutEnv:
         if lives < self.lives:
             # Lost a life
             self.lives = lives
-            # Fire to start next life
-            obs, reward, terminated, truncated, info = self.env.step(1)  # FIRE action
+        
+        # Apply living penalty
+        shaped_reward = reward + self.living_penalty
         
         processed_obs = self.preprocess_observation(obs)
-        return processed_obs, reward, terminated, truncated, info
+        return processed_obs, shaped_reward, terminated, truncated, info
     
     def close(self):
         """Close the environment."""
