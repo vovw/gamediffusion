@@ -30,8 +30,9 @@ class AtariBreakoutEnv:
         self.lives = 5  # Breakout starts with 5 lives
         self.was_real_done = True  # Track if the episode was actually done
         
-        # Living penalty configuration
+        # Reward shaping configuration
         self.living_penalty = -0.001  # Small negative reward per time step
+        self.life_loss_penalty = -1.0  # Substantial penalty for losing a life
     
     def preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Convert RGB observation to 84x84 grayscale."""
@@ -57,12 +58,14 @@ class AtariBreakoutEnv:
         
         # Track lives to detect life loss
         lives = info.get('lives', 0)
+        life_loss_reward = 0.0
         if lives < self.lives:
-            # Lost a life
+            # Lost a life - apply penalty
+            life_loss_reward = self.life_loss_penalty
             self.lives = lives
         
-        # Apply living penalty
-        shaped_reward = reward + self.living_penalty
+        # Apply living penalty and life loss penalty
+        shaped_reward = reward + self.living_penalty + life_loss_reward
         
         processed_obs = self.preprocess_observation(obs)
         return processed_obs, shaped_reward, terminated, truncated, info
