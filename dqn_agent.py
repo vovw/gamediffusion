@@ -47,7 +47,7 @@ class DQNCNN(nn.Module):
     """CNN architecture for DQN, based on the original DQN paper.
     
     Architecture:
-    1. Input: (batch_size, 4, 84, 84) - 4 stacked frames
+    1. Input: (batch_size, 8, 84, 84) - 8 stacked frames
     2. Conv layers process spatial features
     3. FC layers compute Q-values for each action
     """
@@ -145,7 +145,7 @@ class DQNAgent:
         """Select action using epsilon-greedy policy with either argmax or softmax selection.
         
         Args:
-            state: Current state (4 stacked frames)
+            state: Current state (8 stacked frames)
             epsilon: Exploration probability
             use_softmax: If True, use softmax selection. If False, use argmax
             temperature: Temperature parameter for softmax (higher = more uniform)
@@ -158,7 +158,7 @@ class DQNAgent:
             return np.random.randint(0, self.n_actions)
         else:
             # Exploitation: greedy action
-            state_tensor = torch.from_numpy(state).unsqueeze(0)  # (1, 4, 84, 84)
+            state_tensor = torch.from_numpy(state).unsqueeze(0)  # (1, 8, 84, 84)
             if torch.cuda.is_available():
                 state_tensor = state_tensor.cuda()
                 self.policy_net.cuda()
@@ -215,7 +215,7 @@ class DQNAgent:
         # Unpack batch
         states, actions, rewards, next_states, dones = zip(*batch)
         # Convert to tensors
-        states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 4, 84, 84)
+        states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 8, 84, 84)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)  # (B, 1)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
         next_states = torch.from_numpy(np.stack(next_states)).to(self.device).float() / 255.0

@@ -13,11 +13,11 @@ import argparse
 config = {
     'env_name': 'Breakout',
     'n_actions': 4,
-    'state_shape': (4, 84, 84),
+    'state_shape': (8, 84, 84),
     'max_episodes': 20000,
     'max_steps': 10000,
     'epsilon_start': 1.0,
-    'epsilon_end': 0.2,
+    'epsilon_end': 0.05,
     'epsilon_decay': 100000,
     'target_update_freq': 100,
     'checkpoint_dir': 'checkpoints',
@@ -65,7 +65,7 @@ def evaluate_agent(agent, env, n_episodes=10):
     rewards = []
     for _ in range(n_episodes):
         obs, info = env.reset()
-        state_stack = np.stack([obs] * 4, axis=0)
+        state_stack = np.stack([obs] * 8, axis=0)
         done = False
         total_reward = 0
         while not done:
@@ -113,7 +113,7 @@ def main():
     # Fill replay buffer with random actions first
     print("Pre-filling replay buffer with random experiences...")
     obs, info = env.reset()
-    state_stack = np.stack([obs] * 4, axis=0)
+    state_stack = np.stack([obs] * 8, axis=0)
     for step in range(max(5000, config['min_buffer'])):
         action = np.random.randint(0, config['n_actions'])
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -123,13 +123,13 @@ def main():
         state_stack = next_state_stack
         if terminated or truncated:
             obs, info = env.reset()
-            state_stack = np.stack([obs] * 4, axis=0)
+            state_stack = np.stack([obs] * 8, axis=0)
         if step % 1000 == 0:
             print(f"  {step}/{max(5000, config['min_buffer'])} experiences collected")
     
     for episode in pbar:
         obs, info = env.reset()
-        state_stack = np.stack([obs] * 4, axis=0)
+        state_stack = np.stack([obs] * 8, axis=0)
         frames, actions, rewards = [obs], [], []
         done = False
         total_reward = 0

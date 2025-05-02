@@ -96,7 +96,7 @@ def test_full_episode():
 
 def test_dqn_agent_initialization():
     from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     assert hasattr(agent, 'select_action'), "DQNAgent should have select_action method"
     assert hasattr(agent, 'optimize_model'), "DQNAgent should have optimize_model method"
     assert hasattr(agent, 'update_target_network'), "DQNAgent should have update_target_network method"
@@ -104,8 +104,8 @@ def test_dqn_agent_initialization():
 
 def test_dqn_agent_action_selection():
     from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
-    dummy_state = np.zeros((4, 84, 84), dtype=np.uint8)
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
+    dummy_state = np.zeros((8, 84, 84), dtype=np.uint8)
     action = agent.select_action(dummy_state, epsilon=1.0)
     assert isinstance(action, int), "Action should be an integer"
     assert 0 <= action < 4, "Action should be in range [0, 3]"
@@ -113,7 +113,7 @@ def test_dqn_agent_action_selection():
 def test_dqn_replay_buffer():
     from dqn_agent import ReplayBuffer
     buffer = ReplayBuffer(capacity=100)
-    dummy_transition = (np.zeros((4, 84, 84), dtype=np.uint8), 1, 1.0, np.zeros((4, 84, 84), dtype=np.uint8), False)
+    dummy_transition = (np.zeros((8, 84, 84), dtype=np.uint8), 1, 1.0, np.zeros((8, 84, 84), dtype=np.uint8), False)
     buffer.push(*dummy_transition)
     assert len(buffer) == 1, "ReplayBuffer should store transitions"
     sample = buffer.sample(1)
@@ -121,7 +121,7 @@ def test_dqn_replay_buffer():
 
 def test_dqn_target_network_sync():
     from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     # Simulate parameter change
     for param in agent.policy_net.parameters():
         param.data += 1.0
@@ -131,8 +131,8 @@ def test_dqn_target_network_sync():
 
 def test_dqn_epsilon_greedy_policy():
     from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
-    dummy_state = np.zeros((4, 84, 84), dtype=np.uint8)
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
+    dummy_state = np.zeros((8, 84, 84), dtype=np.uint8)
     actions = [agent.select_action(dummy_state, epsilon=1.0) for _ in range(100)]
     assert len(set(actions)) > 1, "With epsilon=1.0, actions should be random"
     actions = [agent.select_action(dummy_state, epsilon=0.0) for _ in range(10)]
@@ -142,13 +142,13 @@ def test_dqn_epsilon_greedy_policy():
 def test_dqn_optimize_model():
     import torch
     from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     # Fill replay buffer with dummy transitions
     for _ in range(128):  # Match the agent's batch_size
-        state = np.zeros((4, 84, 84), dtype=np.uint8)
+        state = np.zeros((8, 84, 84), dtype=np.uint8)
         action = np.random.randint(0, 4)
         reward = np.random.randn()
-        next_state = np.zeros((4, 84, 84), dtype=np.uint8)
+        next_state = np.zeros((8, 84, 84), dtype=np.uint8)
         done = np.random.choice([True, False])
         agent.replay_buffer.push(state, action, reward, next_state, done)
     # Should raise NotImplementedError or fail until implemented
@@ -162,10 +162,10 @@ def test_dqn_optimize_model():
 def test_dqn_training_loop():
     from dqn_agent import DQNAgent
     from atari_env import AtariBreakoutEnv
-    agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     env = AtariBreakoutEnv()
     obs, info = env.reset()
-    state_stack = np.stack([obs]*4, axis=0)  # (4, 84, 84)
+    state_stack = np.stack([obs]*8, axis=0)  # (8, 84, 84)
     epsilon = 1.0
     for step in range(10):
         action = agent.select_action(state_stack, epsilon)
@@ -177,7 +177,7 @@ def test_dqn_training_loop():
         state_stack = next_state_stack
         if terminated or truncated:
             obs, info = env.reset()
-            state_stack = np.stack([obs]*4, axis=0)
+            state_stack = np.stack([obs]*8, axis=0)
     # Try updating target network
     agent.update_target_network()
     env.close() 

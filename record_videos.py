@@ -75,7 +75,7 @@ def record_episode(env, agent, video_writer, epsilon=0.0):
     """Record a single episode."""
     obs, info = env.reset()
     # Initialize state stack for DQN
-    state_stack = np.stack([obs] * 4, axis=0)
+    state_stack = np.stack([obs] * 8, axis=0)
     cumulative_reward = 0
     frame_num = 0
     max_steps = 10000
@@ -149,7 +149,7 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
     
     # Initialize agents
     random_agent = RandomAgent(n_actions=4)
-    dqn_agent = DQNAgent(n_actions=4, state_shape=(4, 84, 84))
+    dqn_agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     
     # Load trained model if available
     if skill_level is not None:
