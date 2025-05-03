@@ -19,7 +19,7 @@ config = {
     'epsilon_start': 1.0,
     'epsilon_end': 0.05,
     'epsilon_decay': 100000,
-    'target_update_freq': 100,
+    'target_update_freq': 500,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
