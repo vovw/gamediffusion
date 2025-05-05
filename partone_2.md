@@ -19,7 +19,12 @@ This guide outlines how to implement Random Network Distillation (RND) to enhanc
 - Create a base network class for both target and predictor networks
 - Architecture should be similar to the feature extractor of your DQN (convolutional layers)
 - Output should be a feature vector (e.g., 512 dimensions) rather than Q-values
-- Use orthogonal initialization for better feature representation
+- Use orthogonal initialization for better feature representation:
+  - Implement using PyTorch's nn.init.orthogonal_() function
+  - Set gain parameter to sqrt(2) for ReLU activations
+  - Orthogonal initialization creates weight matrices with orthogonal columns/rows
+  - This helps preserve gradient magnitudes and prevent vanishing/exploding gradients
+  - It also improves feature diversity and speeds up convergence
 
 #### Target and Predictor Networks
 - Initialize target network with random weights and freeze them (no gradient updates)
@@ -43,15 +48,26 @@ This guide outlines how to implement Random Network Distillation (RND) to enhanc
 - Add parameters to control update frequency (update_proportion)
 - Include methods for tracking and reporting statistics
 
-### 4. Modify DQN Agent
+### 4. Create Two DQN Agents
 
-#### Update DQNAgent Class
-- Add RND instance to the agent
-- Modify experience collection to include intrinsic rewards
-- Update optimization method to also train the RND predictor
-- Add hyperparameters for controlling intrinsic vs extrinsic reward balance
+#### Setup Two Separate Agents
+- Create two identical DQN agents with different purposes:
+  1. **Exploration Agent**:
+     - Responsible for interacting with the environment
+     - Policy updated using combined intrinsic and extrinsic rewards
+     - Focused on discovering novel states and avoiding local minima
+  2. **Exploitation Agent**:
+     - Never directly interacts with the environment during training
+     - Policy updated using only extrinsic rewards
+     - Focused purely on maximizing game score
+     - Used for evaluation and final deployment
 
-### 5. Update Training Loop
+#### Shared Components
+- Both agents should share the same replay buffer
+- RND module is only needed for the exploration agent
+- Both agents can share the same state preprocessing code
+
+### 5. Implement Training Loop with Dual Agents
 
 #### Reward Combination
 - Implement the formula: `total_reward = (1 - alpha) * extrinsic_reward + alpha * intrinsic_reward`
@@ -75,6 +91,8 @@ This guide outlines how to implement Random Network Distillation (RND) to enhanc
 - **update_proportion**: Percentage of transitions used for RND updates (e.g., 0.25)
 - **alpha**: Weight for intrinsic vs extrinsic rewards (e.g., 0.5 initially, decay over time)
 - **learning_rate**: Separate learning rate for the RND predictor network (e.g., 1e-4)
+- **evaluation_frequency**: How often to evaluate the exploitation agent (e.g., every 100 episodes)
+- **evaluation_episodes**: Number of episodes to run during each evaluation (e.g., 10)
 
 ## Best Practices
 
@@ -103,33 +121,59 @@ This guide outlines how to implement Random Network Distillation (RND) to enhanc
 ### Files to Modify
 
 1. **dqn_agent.py**:
-   - Add RND class implementation
+   - Add RND class implementation with orthogonal initialization
+   - Add RunningMeanStd class for normalizing rewards
    - Modify DQNAgent to incorporate RND
    - Add intrinsic reward calculation
 
 2. **train_dqn.py**:
-   - Update training loop to use combined rewards
-   - Add monitoring for intrinsic rewards
+   - Create two DQN agents (exploration and exploitation)
+   - Update training loop to implement dual-agent architecture
+   - Use exploration agent for collecting experiences
+   - Update exploitation agent with extrinsic rewards only
+   - Add periodic evaluation of exploitation agent
    - Add alpha parameter and decay schedule
    - Include RND statistics in logs
 
 ### Data Structures to Update
 
 1. **Replay Buffer**:
-   - Store transitions with combined rewards
-   - Optionally, store intrinsic and extrinsic rewards separately
+   - Store transitions with both intrinsic and extrinsic rewards
+   - Implement methods to retrieve transitions with either combined or extrinsic-only rewards
 
 2. **Training Statistics**:
    - Track intrinsic rewards over time
+   - Track exploration agent performance (combined rewards)
+   - Track exploitation agent performance (extrinsic rewards only)
    - Monitor prediction errors
-   - Track exploration metrics
+   - Track evaluation metrics for exploitation agent
+   - Compare visitation statistics between baseline and RND agents
 
 ## Debugging and Monitoring
 
-- Print RND statistics periodically during training
-- Monitor the ratio of intrinsic to extrinsic rewards
+- Print RND statistics periodically during training:
+  ```
+  if episode % log_frequency == 0:
+      print(f"RND Stats: {rnd.get_stats()}")
+  ```
+- Track both exploration and exploitation agent performances separately:
+  ```
+  exploration_rewards = []  # Combined rewards
+  exploitation_rewards = []  # Extrinsic rewards only
+  evaluation_scores = []  # Periodic evaluation results
+  ```
+- Monitor the ratio of intrinsic to extrinsic rewards:
+  ```
+  intrinsic_ratio = mean(intrinsic_rewards) / (mean(abs(extrinsic_rewards)) + 1e-8)
+  print(f"Intrinsic/Extrinsic ratio: {intrinsic_ratio:.2f}")
+  ```
 - Check that intrinsic rewards gradually decrease for frequently visited states
-- Verify that the agent explores more compared to baseline
+- Compare evaluation performance between exploitation agent and a baseline without RND
+- Create visualizations showing:
+  1. Evaluation scores over time for exploitation agent
+  2. Training scores for both agents
+  3. Intrinsic reward magnitude over time
+  4. Alpha parameter value over time
 
 ## Expected Outcomes
 
