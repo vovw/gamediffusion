@@ -24,7 +24,7 @@ config = {
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
     'save_freq': 10,
-    'min_buffer': 100000,
+    'min_buffer': 20000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -68,13 +68,15 @@ def evaluate_agent(agent, env, n_episodes=10):
         state_stack = np.stack([obs] * 8, axis=0)
         done = False
         total_reward = 0
-        while not done:
+        for step in range(config['max_steps']):
             action = agent.select_action(state_stack, epsilon=0.0)
             next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
             total_reward += reward
             done = terminated or truncated
+            if done:
+                break
         rewards.append(total_reward)
     return np.mean(rewards)
 
@@ -85,6 +87,7 @@ def main():
     parser.add_argument('--min_buffer', type=int, default=None)
     parser.add_argument('--save_freq', type=int, default=None)
     parser.add_argument('--no_save', action='store_true', help='Do not save frames or actions during training')
+    parser.add_argument('--random_exploration', action='store_true', help='Use constant random exploration (epsilon=1.0) throughout training')
     args = parser.parse_args()
     # Override config if args provided
     if args.max_episodes is not None:
@@ -127,6 +130,9 @@ def main():
         if step % 1000 == 0:
             print(f"  {step}/{max(5000, config['min_buffer'])} experiences collected")
     
+    # Create a separate evaluation environment
+    eval_env = AtariBreakoutEnv()
+    
     for episode in pbar:
         obs, info = env.reset()
         state_stack = np.stack([obs] * 8, axis=0)
@@ -137,7 +143,9 @@ def main():
         
         # More optimization steps per episode
         for step in range(config['max_steps']):
-            action = agent.select_action(state_stack, epsilon)
+            # If random_exploration is True, always use epsilon=1.0
+            current_epsilon = 1.0 if args.random_exploration else epsilon
+            action = agent.select_action(state_stack, current_epsilon)
             next_obs, reward, terminated, truncated, info = env.step(action)
             next_state_stack = np.roll(state_stack, shift=-1, axis=0)
             next_state_stack[-1] = next_obs
@@ -156,8 +164,8 @@ def main():
             total_reward += reward
             total_steps += 1
             
-            # Epsilon decay
-            if epsilon > config['epsilon_end']:
+            # Epsilon decay (only if not using random exploration)
+            if not args.random_exploration and epsilon > config['epsilon_end']:
                 epsilon -= epsilon_decay
                 epsilon = max(config['epsilon_end'], epsilon)  # Ensure it doesn't go below epsilon_end
             
@@ -173,15 +181,23 @@ def main():
         episode_rewards.append(total_reward)
         episode_losses.append(avg_loss)
         
-        # Calculate running average
+        # Calculate running average of exploratory rewards
         running_avg = np.mean(episode_rewards[-min(100, len(episode_rewards)):])
         running_avg_rewards.append(running_avg)
         
+        # Periodically evaluate agent with epsilon=0 (policy only, no exploration)
+        if episode % 10 == 0:
+            eval_reward = evaluate_agent(agent, eval_env, n_episodes=5)
+            exploration_type = "Random" if args.random_exploration else "ε-greedy"
+            policy_str = f"Policy eval: {eval_reward:.1f}"
+        else:
+            policy_str = ""
+            
         # Logging
         pbar.set_postfix({
             'ep_reward': total_reward, 
             'avg_reward': f"{running_avg:.1f}",
-            'epsilon': f"{epsilon:.3f}", 
+            'epsilon': f"{1.0 if args.random_exploration else epsilon:.3f}", 
             'skill': skill_level, 
             'loss': f"{avg_loss:.4f}"
         })
@@ -190,7 +206,8 @@ def main():
         if episode > 0 and episode % 10 == 0:
             last_10_loss = episode_losses[-10:]
             last_10_reward = episode_rewards[-10:]
-            print(f"[Stats] Episodes {episode-9}-{episode} | Avg Reward: {np.mean(last_10_reward):.2f} | Avg Loss: {np.mean(last_10_loss):.4f} | Running Avg: {running_avg:.2f}")
+            exploration_type = "Random" if args.random_exploration else "ε-greedy"
+            print(f"[Stats] Episodes {episode-9}-{episode} | {exploration_type} Avg: {np.mean(last_10_reward):.2f} | {policy_str} | Avg Loss: {np.mean(last_10_loss):.4f} | Running Avg: {running_avg:.2f}")
         
         # Save episode data if in skill collection phase
         if (not args.no_save and
@@ -222,6 +239,7 @@ def main():
             print("All skill levels collected. Training complete.")
             break
     env.close()
+    eval_env.close()
     # Save final checkpoint (overwrite previous)
     checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
     torch.save(agent.policy_net.state_dict(), checkpoint_path)

@@ -16,14 +16,17 @@ In this first part, we'll train an RL agent to play Atari Breakout and record it
    - Grayscale frames to reduce dimensionality
    - Frame skipping (4 frames) to speed up training
    - End-of-episode detection based on lives lost
+   - 8-frame stacking for better temporal information
 
 ### Agent Training
 1. Implement a DQN (Deep Q-Network) agent using PyTorch
    - Use a simple CNN architecture (3 convolutional layers + 2 fully connected)
+   - 8-frame stacking for better temporal information
    - Experience replay buffer with capacity of 100,000 transitions
    - Target network update frequency of 1000 steps
    - Epsilon-greedy exploration starting at 1.0 and decaying to 0.1
    - Learning rate of 0.0001 with Adam optimizer
+   - Batch size of 128 for training
 
 2. Train the agent in stages, saving checkpoints at:
    - Random play (untrained)
@@ -79,12 +82,13 @@ data/
 - **RandomAgent**: Agent that selects random actions, records frames, actions, and rewards, and saves them to disk as PNGs and JSON.
 - **DQNAgent**: Deep Q-Network agent implemented in PyTorch, including:
   - 3-layer CNN + 2 fully connected layers for Q-value prediction
+  - Input of 8 stacked frames (instead of traditional 4) for better temporal information
   - Experience replay buffer (capacity 100,000)
   - Double DQN implementation to reduce Q-value overestimation
   - HuberLoss for more robust learning
   - Target network and synchronization logic (every 500 steps)
   - Epsilon-greedy action selection with improved exploration (1.0 to 0.1)
-  - Optimized hyperparameters: learning rate 2.5e-4, batch size 64
+  - Optimized hyperparameters: learning rate 2.5e-4, batch size 128
   - Proper gradient clipping (1.0) for stable training
   - Modular, test-driven design
   - DQN training step (optimize_model) and full training loop
@@ -109,6 +113,15 @@ data/
   - More frequent optimization steps
   - Pre-filling of replay buffer
   - Better exploration strategy
+- **Gameplay Video Recording**: Implementation of `record_videos.py` to:
+  - Generate videos of gameplay episodes for random and trained agents
+  - Save videos as MP4 files at 30fps
+  - Include frame number, action taken, and cumulative reward as overlay text
+  - Support for different skill level checkpoints
+- **Reward Shaping**: Implementation in `AtariBreakoutEnv` including:
+  - Living penalty (-0.001 per time step)
+  - Life loss penalty (-1.0 for losing a life)
+  - Tracking lives between steps to detect life loss
 
 ### Remaining tasks
 - Train DQN agent to different skill levels and save checkpoints (full run with data saving enabled)
@@ -116,7 +129,31 @@ data/
 - Create validation splits for evaluation
 - Integrate experiment tracking (e.g., with WandB)
 
----
+## Planned Improvements Status
+
+1. ✅ **Visualize Current Agent Gameplay**
+   - Videos of random and trained agents are implemented in `record_videos.py`
+   - Proper overlay with frame number, action, and reward
+   - MP4 output at 30fps with correct resolution (160x210 plus text area)
+
+2. ❌ **Upgrade Environment to Full RGB and Higher Resolution**
+   - **Status: Not implemented**
+   - Need to modify environment wrapper to use RGB instead of grayscale
+   - Need to use native Atari resolution (160x210) or higher
+   - Need to reduce frame skip from 4 to 2
+   - Need to update network architecture to handle larger input size
+   - Keep 8-frame stacking for temporal information (currently implemented)
+
+3. ❌ **Implement Prioritized Experience Replay**
+   - **Status: Not implemented**
+   - Need to implement sum-tree data structure
+   - Need to modify sampling to use priorities
+   - Need to implement importance sampling weights
+
+4. ✅ **Implement Reward Shaping**
+   - Living penalty of -0.001 per time step implemented
+   - Life loss penalty of -1.0 implemented
+   - Proper tracking of lives between steps implemented
 
 ## Environment Setup & Troubleshooting
 

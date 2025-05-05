@@ -38,15 +38,16 @@ Add prioritized replay buffer that:
 
 ## 4. Implement Reward Shaping
 
-Enhance reward function with the following structure:
+Enhance reward function as follows (as implemented in `AtariBreakoutEnv`):
 - Original reward: +1 for breaking a brick (unchanged)
-- Living bonus: +0.02 per time step (1/50th of brick reward)
-- Life loss penalty: -2 for losing a life
+- Living penalty: -0.001 per time step (applied every step)
+- Life loss penalty: -1.0 for losing a life (applied when number of lives decreases)
 - Implementation details:
-  - Track lives between steps to detect life loss
-  - Add shaped rewards to original rewards
-  - Keep track of original vs shaped rewards for evaluation
-  - Make the shaping configurable (easy to turn on/off)
+  - Track lives between steps to detect life loss (compare `info['lives']` to previous value)
+  - In the `step` method, shaped reward is computed as: `shaped_reward = reward + living_penalty + life_loss_penalty (if life lost)`
+  - The shaped reward is returned by the environment for each step
+  - Make the shaping configurable (easy to turn on/off) if needed for ablation
+  - Keep track of original vs shaped rewards for evaluation if required
 
 ## Training Protocol
 
