@@ -102,7 +102,7 @@ def main():
     exploration_mode = args.exploration_mode
     if exploration_mode == 'temperature':
         # PER hyperparameters
-        per_alpha = 0.6
+        per_alpha = 0.8
         per_beta_init = 0.4
         per_beta_final = 1.0
         max_episodes = config['max_episodes']

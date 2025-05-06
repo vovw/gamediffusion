@@ -159,12 +159,25 @@ class PrioritizedReplayBuffer:
         weights = weights.astype(np.float32)
         return states, actions, rewards, next_states, dones, weights, idxs
 
-    def update_priorities(self, idxs, priorities):
-        print(f"[DEBUG] Max prority from priorities: {max(priorities)}")
+    def update_priorities_nodebug(self, idxs, priorities):
         for idx, priority in zip(idxs, priorities):
             p = (abs(priority) + self.epsilon) ** self.alpha
             self.tree.update(idx, p)
             self.max_priority = max(self.max_priority, p)
+    
+    def update_priorities(self, idxs, priorities):
+        #print(f"[DEBUG] Raw priorities - Max: {np.max(priorities):.6f}, Mean: {np.mean(priorities):.6f}")
+        
+        transformed_priorities = []
+        for idx, priority in zip(idxs, priorities):
+            p = (abs(priority) + self.epsilon) ** self.alpha
+            transformed_priorities.append(p)
+            self.tree.update(idx, p)
+        
+        new_max = max(transformed_priorities) if transformed_priorities else 0
+        self.max_priority = max(self.max_priority, new_max)
+        #print(f"[DEBUG] Transformed priorities - Max: {new_max:.6f}, Alpha: {self.alpha}")
+        #print(f"[DEBUG] Updated max_priority: {self.max_priority:.6f}")
 
     def anneal_beta(self, new_beta):
         self.beta = new_beta
@@ -332,6 +345,11 @@ class DQNAgent:
                 next_q_values = self.target_net(next_states).gather(1, next_actions)
                 target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
             td_errors = q_values - target_q
+            
+            max_td = td_errors.abs().max().item()
+            mean_td = td_errors.abs().mean().item()
+            #print(f"[DEBUG] TD Errors - Max: {max_td:.6f}, Mean: {mean_td:.6f}")
+
             if weights is not None:
                 loss = (weights * td_errors.pow(2)).mean()
             else:
@@ -348,7 +366,10 @@ class DQNAgent:
             self.optimizer.step()
         # Update priorities if using PER
         if self.prioritized and idxs is not None:
-            new_priorities = (td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
+            scaling_factor = 10
+            scaled_td_errors = td_errors * scaling_factor  # Scale by a factor of 10
+            new_priorities = (scaled_td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
+            #print(f"[DEBUG] New priorities - Max: {new_priorities.max():.6f}, Mean: {new_priorities.mean():.6f}")
             self.replay_buffer.update_priorities(idxs, new_priorities)
         return loss.item()
 
@@ -400,7 +421,8 @@ class DQNAgent:
                 
             # Unpack random batch
             rand_states, rand_actions, rand_extrinsic_rewards, rand_intrinsic_rewards, rand_next_states, rand_dones = zip(*random_batch)
-            
+            rand_rewards = rand_extrinsic_rewards + rand_intrinsic_rewards
+
             # Convert to tensors for both batches
             per_states_tensor = torch.from_numpy(np.stack(per_states)).to(self.device).float() / 255.0
             per_actions_tensor = torch.tensor(per_actions, dtype=torch.long, device=self.device).unsqueeze(1)
