@@ -19,15 +19,10 @@ Usage:
     # Save to different directory
     python record_videos.py --skill_level 2 --output_dir videos_skill2
 
-    # Control exploration rate of trained agent
-    python record_videos.py --epsilon 0.1  # 10% random actions
-    python record_videos.py --skill_level 2 --epsilon 0.2  # 20% random actions with skill level 2
-
 Arguments:
     --num_episodes: Number of episodes to record for each agent (default: 5)
     --output_dir: Directory to save videos (default: 'videos')
     --skill_level: Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.
-    --epsilon: Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore). Default: 0.0
     --no_sync: Set to True to use a non-synced directory for video output (default: False)
 
 Output:
@@ -71,58 +66,44 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward):
     
     return frame_with_text
 
-def record_episode(env, agent, video_writer, epsilon=0.0):
+def record_episode(env, agent, video_writer):
     """Record a single episode."""
     obs, info = env.reset()
     # Initialize state stack for DQN
     state_stack = np.stack([obs] * 8, axis=0)
     cumulative_reward = 0
     frame_num = 0
-    max_steps = 10000
-    
+    max_steps = 1000
     while True:
         if frame_num > max_steps:
             break
-        
-        # Get raw frame from environment (before preprocessing)
         raw_frame = env.env.render()  # This gets the 160x210 RGB frame
-        
         if raw_frame is None or raw_frame.size == 0:
             print("Warning: Received empty frame from environment. Skipping frame.")
             continue
-            
         # Get action from agent
         if isinstance(agent, DQNAgent):
-            action = agent.select_action(state_stack, epsilon)
+            action = agent.select_action(state_stack)
         else:  # RandomAgent
             action = agent.select_action()
-        
-        # Add overlay and write frame
         frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
         if frame_with_overlay is not None:
             video_writer.write(frame_with_overlay)
-        
-        # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
         cumulative_reward += reward
         frame_num += 1
-        
-        # Update state stack for DQN
         if isinstance(agent, DQNAgent):
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
-        
         if terminated or truncated:
-            # Write final frame
             raw_frame = env.env.render()
             if raw_frame is not None and raw_frame.size > 0:
                 frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
                 video_writer.write(frame_with_overlay)
             break
-    
     return cumulative_reward
 
-def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None, epsilon=0.0, no_sync=False):
+def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None, no_sync=False):
     """Record gameplay videos for both random and trained agents.
     
     Args:
@@ -130,7 +111,6 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
         output_dir: Directory to save videos
         skill_level: If specified (0-3), load that skill level's checkpoint.
                     If None, use latest checkpoint.
-        epsilon: Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore)
         no_sync: If True, use a temporary directory and copy files to output_dir after completion
     """
     # Use a temporary directory if no_sync is True
@@ -216,21 +196,14 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
     for episode in range(num_episodes):
         video_path = os.path.join(working_dir, f'random_agent_episode_{episode+1}{file_ext}')
         video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
-        
         if not video_writer.isOpened():
             print(f"Error: Could not open video writer for {video_path}")
             continue
-            
         reward = record_episode(env, random_agent, video_writer)
-        
-        # Explicitly release and let OS finish writing
         video_writer.release()
-        time.sleep(0.5)  # Give OS time to finish writing
-        
-        # Verify file size
+        time.sleep(0.5)
         file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
         print(f"Random Agent Episode {episode+1} - Score: {reward} - Video size: {file_size} bytes")
-        
         if file_size < 1000:
             print(f"Warning: Video file may be corrupted (small size): {video_path}")
     
@@ -239,21 +212,14 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
     for episode in range(num_episodes):
         video_path = os.path.join(working_dir, f'trained_agent_{checkpoint_name}_episode_{episode+1}{file_ext}')
         video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
-        
         if not video_writer.isOpened():
             print(f"Error: Could not open video writer for {video_path}")
             continue
-            
-        reward = record_episode(env, dqn_agent, video_writer, epsilon=epsilon)
-        
-        # Explicitly release and let OS finish writing
+        reward = record_episode(env, dqn_agent, video_writer)
         video_writer.release()
-        time.sleep(0.5)  # Give OS time to finish writing
-        
-        # Verify file size
+        time.sleep(0.5)
         file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
         print(f"Trained Agent Episode {episode+1} - Score: {reward} - Video size: {file_size} bytes")
-        
         if file_size < 1000:
             print(f"Warning: Video file may be corrupted (small size): {video_path}")
     
@@ -284,7 +250,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', type=int, default=5, help='Number of episodes to record for each agent')
     parser.add_argument('--output_dir', type=str, default='videos', help='Directory to save videos')
     parser.add_argument('--skill_level', type=int, choices=[0,1,2,3], help='Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.')
-    parser.add_argument('--epsilon', type=float, default=0.0, help='Exploration rate for trained agent (0.0 = fully exploit, 1.0 = fully explore)')
     parser.add_argument('--no_sync', action='store_true', help='Use a temporary directory to avoid iCloud sync issues')
     args = parser.parse_args()
     
@@ -292,6 +257,5 @@ if __name__ == '__main__':
         num_episodes=args.num_episodes,
         output_dir=args.output_dir,
         skill_level=args.skill_level,
-        epsilon=args.epsilon,
         no_sync=args.no_sync
     )

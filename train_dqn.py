@@ -3,28 +3,26 @@ import numpy as np
 import torch
 from tqdm import trange
 from atari_env import AtariBreakoutEnv
-from dqn_agent import DQNAgent
+from dqn_agent import DQNAgent, ReplayBuffer
 import cv2
 import json
 import random
 import argparse
+from rnd import RandomNetworkDistillation
 
 # Config
 config = {
     'env_name': 'Breakout',
     'n_actions': 4,
     'state_shape': (8, 84, 84),
-    'max_episodes': 20000,
-    'max_steps': 10000,
-    'epsilon_start': 1.0,
-    'epsilon_end': 0.05,
-    'epsilon_decay': 100000,
+    'max_episodes': 5,
+    'max_steps': 1000,
     'target_update_freq': 500,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
     'save_freq': 10,
-    'min_buffer': 20000,
+    'min_buffer': 5000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -69,7 +67,7 @@ def evaluate_agent(agent, env, n_episodes=10):
         done = False
         total_reward = 0
         for step in range(config['max_steps']):
-            action = agent.select_action(state_stack, epsilon=0.0)
+            action = agent.select_action(state_stack)  # Always greedy
             next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
@@ -87,7 +85,6 @@ def main():
     parser.add_argument('--min_buffer', type=int, default=None)
     parser.add_argument('--save_freq', type=int, default=None)
     parser.add_argument('--no_save', action='store_true', help='Do not save frames or actions during training')
-    parser.add_argument('--random_exploration', action='store_true', help='Use constant random exploration (epsilon=1.0) throughout training')
     args = parser.parse_args()
     # Override config if args provided
     if args.max_episodes is not None:
@@ -99,22 +96,32 @@ def main():
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['data_dir'], exist_ok=True)
     os.makedirs(config['actions_dir'], exist_ok=True)
-    env = AtariBreakoutEnv()
-    agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'])
-    epsilon = config['epsilon_start']
-    epsilon_decay = (config['epsilon_start'] - config['epsilon_end']) / config['epsilon_decay']
+
+    # --- Dual Agent and RND Setup ---
+    shared_replay_buffer = ReplayBuffer(capacity=1000000)
+    exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
+    exploitation_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
+    rnd = RandomNetworkDistillation(state_shape=config['state_shape'], output_dim=512, lr=1e-5, reward_scale=0.1)
+    alpha = 0.5
+    alpha_decay = 0.99995  # Decay per episode, adjust as needed
+    min_alpha = 0.05
+    # ---
+
     total_steps = 0
-    episode_rewards = []
+    exploration_rewards = []  # Combined rewards
+    exploitation_rewards = []  # Extrinsic rewards only
+    intrinsic_rewards_log = []
+    episode_losses = []
+    running_avg_rewards = []
     skill_level = 0
     skill_episodes = 0
     skill_thresholds = config['skill_thresholds']
     skill_counts = [0] * len(skill_thresholds)
     pbar = trange(config['max_episodes'], desc='Training')
-    episode_losses = []
-    running_avg_rewards = []
-    
+
     # Fill replay buffer with random actions first
     print("Pre-filling replay buffer with random experiences...")
+    env = AtariBreakoutEnv()
     obs, info = env.reset()
     state_stack = np.stack([obs] * 8, axis=0)
     for step in range(max(5000, config['min_buffer'])):
@@ -122,130 +129,134 @@ def main():
         next_obs, reward, terminated, truncated, info = env.step(action)
         next_state_stack = np.roll(state_stack, shift=-1, axis=0)
         next_state_stack[-1] = next_obs
-        agent.replay_buffer.push(state_stack, action, reward, next_state_stack, terminated or truncated)
+        # For prefill, set intrinsic reward to 0
+        shared_replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated)
         state_stack = next_state_stack
         if terminated or truncated:
             obs, info = env.reset()
             state_stack = np.stack([obs] * 8, axis=0)
         if step % 1000 == 0:
             print(f"  {step}/{max(5000, config['min_buffer'])} experiences collected")
-    
+
     # Create a separate evaluation environment
     eval_env = AtariBreakoutEnv()
-    
+
     for episode in pbar:
+        print(f"\n\nEpisode {episode}")
         obs, info = env.reset()
         state_stack = np.stack([obs] * 8, axis=0)
-        frames, actions, rewards = [obs], [], []
-        done = False
-        total_reward = 0
+        frames, actions, extrinsic_rewards, intrinsic_rewards = [obs], [], [], []
+        total_combined_reward = 0
+        total_extrinsic_reward = 0
         losses = []
-        
-        # More optimization steps per episode
+        done = False
         for step in range(config['max_steps']):
-            # If random_exploration is True, always use epsilon=1.0
-            current_epsilon = 1.0 if args.random_exploration else epsilon
-            action = agent.select_action(state_stack, current_epsilon)
-            next_obs, reward, terminated, truncated, info = env.step(action)
+            action = exploration_agent.select_action(state_stack, mode='softmax', temperature=1.0)  # Softmax exploration
+            next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
             next_state_stack = np.roll(state_stack, shift=-1, axis=0)
             next_state_stack[-1] = next_obs
-            agent.replay_buffer.push(state_stack, action, reward, next_state_stack, terminated or truncated)
-            
-            # Do multiple optimization steps per environment step
-            for _ in range(5):  # Increased optimization frequency
-                loss = agent.optimize_model()
+
+            # Compute intrinsic reward for the new state
+            intrinsic_reward = float(rnd.compute_intrinsic_reward(np.expand_dims(next_state_stack, axis=0)).cpu().numpy()[0])
+            # if step < 10:
+            #     print(f"Previous state sum: {np.sum(state_stack)}")
+            #     #print(f"Previous state: {state_stack}")
+            #     #print(f"Action: {action}")
+            #     print(f"Next state sum: {np.sum(next_state_stack)}")
+            #     #print(f"Next state: {next_state_stack}")
+            #     action_names = ['NOOP', 'FIRE', 'RIGHT', 'LEFT']
+            #     print(f"Action: {action_names[action]}, Intrinsic reward: {intrinsic_reward}, Extrinsic reward: {extrinsic_reward}")
+            #     print("--------------------------------")
+            # Store both rewards in buffer
+            shared_replay_buffer.push(state_stack, action, extrinsic_reward, intrinsic_reward, next_state_stack, terminated or truncated)
+            # Optimize exploration agent (combined reward)
+            for _ in range(5):
+                loss = exploration_agent.optimize_model(mode='exploration', alpha=alpha)
                 if loss is not None:
                     losses.append(loss)
-            
+            # Optimize exploitation agent (extrinsic reward only)
+            for _ in range(5):
+                loss = exploitation_agent.optimize_model(mode='exploitation')
+            # Optionally update RND predictor (e.g., on a subset of steps)
+            if np.random.rand() < 0.2:
+                if len(shared_replay_buffer) >= 128:  # Use batch size 128 as in DQNAgent
+                    batch = shared_replay_buffer.sample(128, mode='exploration', alpha=alpha)
+                    states, _, _, _, _ = batch  # Only use states
+                states_np = np.stack(states)
+                rnd.update(states_np)
+                # print(f"RND update: {rnd.get_stats()}")
             state_stack = next_state_stack
             frames.append(next_obs)
             actions.append(action)
-            rewards.append(reward)
-            total_reward += reward
+            extrinsic_rewards.append(extrinsic_reward)
+            intrinsic_rewards.append(intrinsic_reward)
+            total_extrinsic_reward += extrinsic_reward
+            total_combined_reward += (1 - alpha) * extrinsic_reward + alpha * intrinsic_reward
             total_steps += 1
-            
-            # Epsilon decay (only if not using random exploration)
-            if not args.random_exploration and epsilon > config['epsilon_end']:
-                epsilon -= epsilon_decay
-                epsilon = max(config['epsilon_end'], epsilon)  # Ensure it doesn't go below epsilon_end
-            
-            # Target network update
             if total_steps % config['target_update_freq'] == 0:
-                agent.update_target_network()
-                
+                exploration_agent.update_target_network()
+                exploitation_agent.update_target_network()
             if terminated or truncated:
                 break
-                
-        # Process episode results
         avg_loss = np.mean(losses) if losses else 0.0
-        episode_rewards.append(total_reward)
-        episode_losses.append(avg_loss)
-        
-        # Calculate running average of exploratory rewards
-        running_avg = np.mean(episode_rewards[-min(100, len(episode_rewards)):])
+        exploration_rewards.append(total_combined_reward)
+        exploitation_rewards.append(total_extrinsic_reward)
+        intrinsic_rewards_log.append(np.sum(intrinsic_rewards))
+        running_avg = np.mean(exploration_rewards[-min(100, len(exploration_rewards)):])
         running_avg_rewards.append(running_avg)
-        
-        # Periodically evaluate agent with epsilon=0 (policy only, no exploration)
+        # Alpha decay
+        alpha = max(min_alpha, alpha * alpha_decay)
+        # Periodic evaluation of exploitation agent
         if episode % 10 == 0:
-            eval_reward = evaluate_agent(agent, eval_env, n_episodes=5)
-            exploration_type = "Random" if args.random_exploration else "ε-greedy"
+            eval_reward = evaluate_agent(exploitation_agent, eval_env, n_episodes=5)
             policy_str = f"Policy eval: {eval_reward:.1f}"
         else:
             policy_str = ""
-            
         # Logging
         pbar.set_postfix({
-            'ep_reward': total_reward, 
-            'avg_reward': f"{running_avg:.1f}",
-            'epsilon': f"{1.0 if args.random_exploration else epsilon:.3f}", 
-            'skill': skill_level, 
+            'explore_r': total_combined_reward,
+            'exploit_r': total_extrinsic_reward,
+            'alpha': f"{alpha:.3f}",
             'loss': f"{avg_loss:.4f}"
         })
-        
-        # Print running averages every 10 episodes
+        # Print RND stats and reward ratios every 10 episodes
         if episode > 0 and episode % 10 == 0:
-            last_10_loss = episode_losses[-10:]
-            last_10_reward = episode_rewards[-10:]
-            exploration_type = "Random" if args.random_exploration else "ε-greedy"
-            print(f"[Stats] Episodes {episode-9}-{episode} | {exploration_type} Avg: {np.mean(last_10_reward):.2f} | {policy_str} | Avg Loss: {np.mean(last_10_loss):.4f} | Running Avg: {running_avg:.2f}")
-        
+            last_10_explore = exploration_rewards[-10:]
+            last_10_exploit = exploitation_rewards[-10:]
+            last_10_intrinsic = intrinsic_rewards_log[-10:]
+            print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str} | Alpha: {alpha:.3f}")
+            print(f"RND Stats: {rnd.get_stats()}")
+            intrinsic_ratio = np.mean(last_10_intrinsic) / (np.mean(np.abs(last_10_exploit)) + 1e-8)
+            print(f"Intrinsic/Extrinsic ratio: {intrinsic_ratio:.2f}")
         # Save episode data if in skill collection phase
         if (not args.no_save and
             skill_level < len(skill_thresholds) and
             running_avg >= skill_thresholds[skill_level]):
             if skill_counts[skill_level] < config['episodes_per_skill']:
-                save_episode_data(frames, actions, rewards, skill_level, skill_counts[skill_level]+1, config)
+                save_episode_data(frames, actions, extrinsic_rewards, skill_level, skill_counts[skill_level]+1, config)
                 skill_counts[skill_level] += 1
             if skill_counts[skill_level] >= config['episodes_per_skill']:
                 print(f"Skill level {skill_level} ({skill_thresholds[skill_level]}+) complete.")
-                # Save checkpoint
                 checkpoint_path = os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth')
-                torch.save(agent.policy_net.state_dict(), checkpoint_path)
-                # Print parameter stats
-                param_count = sum(p.numel() for p in agent.policy_net.parameters())
-                param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
+                torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
+                param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
+                param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
                 print(f"Saved model to {checkpoint_path}")
-
                 skill_level += 1
-        # Periodic checkpoint (overwrite previous)
         if episode % config['save_freq'] == 0:
             checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
-            torch.save(agent.policy_net.state_dict(), checkpoint_path)
-            # Print parameter stats
-            param_count = sum(p.numel() for p in agent.policy_net.parameters())
-            param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-        # Early stop if all skill levels collected
+            torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
+            param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
+            param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
         if skill_level >= len(skill_thresholds):
             print("All skill levels collected. Training complete.")
             break
     env.close()
     eval_env.close()
-    # Save final checkpoint (overwrite previous)
     checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
-    torch.save(agent.policy_net.state_dict(), checkpoint_path)
-    # Print parameter stats
-    param_count = sum(p.numel() for p in agent.policy_net.parameters())
-    param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
+    torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
+    param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
+    param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
     print(f"\nSaved final model to {checkpoint_path}")
     print(f"Parameter count: {param_count:,}")
     print(f"Parameter sum: {param_sum:.2f}")

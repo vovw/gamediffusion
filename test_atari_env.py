@@ -106,7 +106,7 @@ def test_dqn_agent_action_selection():
     from dqn_agent import DQNAgent
     agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
     dummy_state = np.zeros((8, 84, 84), dtype=np.uint8)
-    action = agent.select_action(dummy_state, epsilon=1.0)
+    action = agent.select_action(dummy_state)
     assert isinstance(action, int), "Action should be an integer"
     assert 0 <= action < 4, "Action should be in range [0, 3]"
 
@@ -128,15 +128,6 @@ def test_dqn_target_network_sync():
     agent.update_target_network()
     for p, t in zip(agent.policy_net.parameters(), agent.target_net.parameters()):
         assert np.allclose(p.detach().cpu().numpy(), t.detach().cpu().numpy()), "Target network should sync with policy network"
-
-def test_dqn_epsilon_greedy_policy():
-    from dqn_agent import DQNAgent
-    agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
-    dummy_state = np.zeros((8, 84, 84), dtype=np.uint8)
-    actions = [agent.select_action(dummy_state, epsilon=1.0) for _ in range(100)]
-    assert len(set(actions)) > 1, "With epsilon=1.0, actions should be random"
-    actions = [agent.select_action(dummy_state, epsilon=0.0) for _ in range(10)]
-    assert len(set(actions)) == 1, "With epsilon=0.0, actions should be greedy (identical)"
 
 # TDD: Test for DQNAgent.optimize_model (should fail until implemented)
 def test_dqn_optimize_model():
@@ -166,9 +157,8 @@ def test_dqn_training_loop():
     env = AtariBreakoutEnv()
     obs, info = env.reset()
     state_stack = np.stack([obs]*8, axis=0)  # (8, 84, 84)
-    epsilon = 1.0
     for step in range(10):
-        action = agent.select_action(state_stack, epsilon)
+        action = agent.select_action(state_stack)
         next_obs, reward, terminated, truncated, info = env.step(action)
         next_state_stack = np.roll(state_stack, shift=-1, axis=0)
         next_state_stack[-1] = next_obs

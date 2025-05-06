@@ -18,29 +18,33 @@ from collections import deque
 import random
 
 class ReplayBuffer:
-    """Experience replay buffer for DQN.
-    
-    Stores transitions (state, action, reward, next_state, done) and allows
-    random sampling for training. This breaks correlation between consecutive
-    samples and improves training stability.
-    """
+    """Experience replay buffer for DQN with support for intrinsic and extrinsic rewards."""
     def __init__(self, capacity: int):
-        """Initialize the buffer with a given capacity."""
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity) # FIFO buffer
 
-    def push(self, state, action, reward, next_state, done):
-        """Store a transition in the buffer."""
-        self.buffer.append((state, action, reward, next_state, done))
+    def push(self, state, action, extrinsic_reward, intrinsic_reward, next_state, done):
+        """Store a transition in the buffer with both extrinsic and intrinsic rewards."""
+        self.buffer.append((state, action, extrinsic_reward, intrinsic_reward, next_state, done))
 
-    def sample(self, batch_size: int):
-        """Sample a batch of transitions from the buffer."""
+    def sample(self, batch_size: int, mode: str = 'exploration', alpha: float = 0.5):
+        """
+        Sample a batch of transitions.
+        mode: 'exploration' returns combined reward, 'exploitation' returns extrinsic only.
+        alpha: weight for intrinsic vs extrinsic reward (used in exploration mode)
+        """
         indices = random.sample(range(len(self.buffer)), batch_size)
         batch = [self.buffer[idx] for idx in indices]
-        return batch
+        states, actions, extrinsic_rewards, intrinsic_rewards, next_states, dones = zip(*batch)
+        if mode == 'exploration':
+            # Combined reward
+            rewards = [(1 - alpha) * er + alpha * ir for er, ir in zip(extrinsic_rewards, intrinsic_rewards)]
+        else:
+            # Exploitation: extrinsic only
+            rewards = extrinsic_rewards
+        return states, actions, rewards, next_states, dones
 
     def __len__(self):
-        """Return the current size of internal memory."""
         return len(self.buffer)
 
 class DQNCNN(nn.Module):
@@ -117,13 +121,13 @@ class DQNAgent:
        - Clips gradient norm to 1.0
        - Maintains stable updates
     """
-    def __init__(self, n_actions: int, state_shape):
+    def __init__(self, n_actions: int, state_shape, replay_buffer=None):
         """Initialize DQN agent with networks and replay buffer."""
         self.n_actions = n_actions
         self.state_shape = state_shape
         self.policy_net = DQNCNN(state_shape, n_actions)
         self.target_net = DQNCNN(state_shape, n_actions)
-        self.replay_buffer = ReplayBuffer(capacity=1000000)
+        self.replay_buffer = replay_buffer if replay_buffer is not None else ReplayBuffer(capacity=1000000)
         self.gamma = 0.99  # Discount factor
         self.batch_size = 128
         self.learning_rate = 3e-4
@@ -141,112 +145,56 @@ class DQNAgent:
         if hasattr(torch, 'compile') and self.device.type == 'cuda':
             self.policy_net = torch.compile(self.policy_net)
 
-    def select_action(self, state, epsilon: float, use_softmax: bool = False, temperature: float = 1.0) -> int:
-        """Select action using epsilon-greedy policy with either argmax or softmax selection.
-        
-        Args:
-            state: Current state (8 stacked frames)
-            epsilon: Exploration probability
-            use_softmax: If True, use softmax selection. If False, use argmax
-            temperature: Temperature parameter for softmax (higher = more uniform)
-            
-        The Q-values are normalized before selection to prevent
-        any action from dominating due to Q-value scale issues.
-        """
-        if np.random.rand() < epsilon:
-            # Exploration: random action
-            return np.random.randint(0, self.n_actions)
+    def select_action(self, state, mode: str = 'greedy', temperature: float = 1.0) -> int:
+        """Select action using greedy (argmax) or softmax policy."""
+        state_tensor = torch.from_numpy(state).unsqueeze(0)  # (1, 8, 84, 84)
+        if torch.cuda.is_available():
+            state_tensor = state_tensor.cuda()
+            self.policy_net.cuda()
+        elif torch.backends.mps.is_available():
+            state_tensor = state_tensor.to('mps')
+            self.policy_net.to('mps')
         else:
-            # Exploitation: greedy action
-            state_tensor = torch.from_numpy(state).unsqueeze(0)  # (1, 8, 84, 84)
-            if torch.cuda.is_available():
-                state_tensor = state_tensor.cuda()
-                self.policy_net.cuda()
-            elif torch.backends.mps.is_available():
-                state_tensor = state_tensor.to('mps')
-                self.policy_net.to('mps')
+            state_tensor = state_tensor.cpu()
+            self.policy_net.cpu()
+        self.policy_net.eval()
+        with torch.no_grad():
+            q_values = self.policy_net(state_tensor)
+            q_values = q_values - q_values.mean(dim=1, keepdim=True)
+            q_values = q_values / (q_values.std(dim=1, keepdim=True) + 1e-8)
+            if mode == 'softmax':
+                # Softmax action selection (Boltzmann exploration)
+                logits = q_values / max(temperature, 1e-6)
+                probs = torch.softmax(logits, dim=1)
+                action = int(torch.multinomial(probs, num_samples=1).item())
             else:
-                state_tensor = state_tensor.cpu()
-                self.policy_net.cpu()
-            
-            # Set model to eval mode for inference
-            self.policy_net.eval()
-            with torch.no_grad():
-                q_values = self.policy_net(state_tensor)
-                # Normalize Q-values to prevent any action from dominating
-                q_values = q_values - q_values.mean(dim=1, keepdim=True)
-                q_values = q_values / (q_values.std(dim=1, keepdim=True) + 1e-8)
-                
-                if use_softmax:
-                    # Softmax selection with temperature
-                    probabilities = torch.softmax(q_values / temperature, dim=1)
-                    action = int(torch.multinomial(probabilities, 1).item())
-                else:
-                    # Standard argmax selection
-                    action = int(torch.argmax(q_values, dim=1).item())
-            return action
+                action = int(torch.argmax(q_values, dim=1).item())
+        return action
 
-    def optimize_model(self):
-        """Update policy network using double DQN algorithm.
-        
-        Key Steps:
-        1. Sample batch from replay buffer
-        2. Compute current Q-values for taken actions
-        3. Compute next Q-values using double DQN:
-           - Use policy net to select actions
-           - Use target net to evaluate those actions
-           This prevents overestimation bias
-        4. Compute Huber loss and update policy network
-        
-        Q-value Overestimation Example:
-        Consider a state with true Q-values [1.0, 1.0, 1.0, 1.0]
-        Policy net estimates: [0.8, 1.2, 0.9, 1.1]
-        Target net estimates: [1.1, 0.9, 1.2, 0.8]
-        
-        Regular DQN would use max(target_net) = 1.2 (overestimated)
-        Double DQN:
-        1. Policy net selects action (index of 1.2 from its estimates)
-        2. Uses target net's value for that action (0.9)
-        Result is closer to true Q-value (1.0)
-        """
+    def optimize_model(self, mode: str = 'exploration', alpha: float = 0.5):
+        """Update policy network using double DQN algorithm. Mode controls reward type."""
         if len(self.replay_buffer) < self.batch_size:
             return None
-        batch = self.replay_buffer.sample(self.batch_size)
-        # Unpack batch
-        states, actions, rewards, next_states, dones = zip(*batch)
+        batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
+        states, actions, rewards, next_states, dones = batch
         # Convert to tensors
         states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 8, 84, 84)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)  # (B, 1)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
         next_states = torch.from_numpy(np.stack(next_states)).to(self.device).float() / 255.0
         dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
-        
         self.policy_net.train()
-        # Mixed precision if CUDA
         scaler = torch.cuda.amp.GradScaler() if self.device.type == 'cuda' else None
-        
         with torch.cuda.amp.autocast(enabled=(scaler is not None)):
-            # Get Q-values for taken actions
-            # Shape explanation:
-            # policy_net(states) -> (B, n_actions)
-            # gather(1, actions) -> (B, 1) selects Q-values of taken actions
             q_values = self.policy_net(states).gather(1, actions)  # (B, 1)
-            
             with torch.no_grad():
-                # Double DQN: Use policy net to select actions, target net to evaluate them
-                # This prevents overestimation by decomposing max operation into action selection and evaluation
-                next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]  # Select actions using policy net
-                next_q_values = self.target_net(next_states).gather(1, next_actions)  # Evaluate using target net
+                next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]
+                next_q_values = self.target_net(next_states).gather(1, next_actions)
                 target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
-            
-            # Huber loss combines L2 for small errors and L1 for large errors
-            # More robust to outliers than MSE loss
             loss = nn.HuberLoss()(q_values, target_q)
-        
         self.optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
-            # Clip gradients to prevent explosive updates
             torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
             scaler.step(self.optimizer)
             scaler.update()

@@ -10,6 +10,14 @@ class RunningMeanStd:
     """
     Tracks the running mean and standard deviation of values.
     Used for normalizing observations and rewards in RND.
+    The RunningMeanStd implementation in your code uses an algorithm called Welford's online algorithm for computing running statistics.
+    It doesn't store past observations - instead, it maintains three values that get updated with each new batch of data:
+    - mean: The running mean of the values
+    - var: The running variance of the values
+    - count: The number of values seen so far
+    When you call update(x), it computes the mean and variance of the new batch of data x.
+    
+
     """
     def __init__(self, shape):
         self.mean = np.zeros(shape, dtype=np.float32)
