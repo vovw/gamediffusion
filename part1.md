@@ -22,13 +22,33 @@ In this first part, we'll train an RL agent to play Atari Breakout and record it
 1. Implement a DQN (Deep Q-Network) agent using PyTorch
    - Use a simple CNN architecture (3 convolutional layers + 2 fully connected)
    - 8-frame stacking for better temporal information
-   - Experience replay buffer with capacity of 100,000 transitions
-   - Target network update frequency of 1000 steps
-   - Epsilon-greedy exploration starting at 1.0 and decaying to 0.1
-   - Learning rate of 0.0001 with Adam optimizer
+   - Experience replay buffer with capacity of 1,000,000 transitions
+   - Target network update frequency of 500 steps
+   - Epsilon-greedy and softmax exploration
+   - Learning rate of 0.0001–0.00025 with Adam optimizer
    - Batch size of 128 for training
+   - Double DQN implementation to reduce Q-value overestimation
+   - HuberLoss for robust learning
+   - Proper gradient clipping (1.0) for stable training
+   - Modular, test-driven design
+   - Proper device selection (CUDA/MPS/CPU) and torch.compile for speed
 
-2. Train the agent in stages, saving checkpoints at:
+2. **Random Network Distillation (RND) for Intrinsic Rewards**
+   - Implement RND using a fixed random target network and a trainable predictor network
+   - Compute intrinsic reward as the prediction error between the two networks
+   - Normalize and scale intrinsic rewards using running statistics
+   - Use orthogonal initialization for RND networks
+   - Intrinsic rewards encourage exploration of novel states
+
+3. **Dual-Agent Training: Exploration and Exploitation**
+   - Use two DQN agents sharing a replay buffer:
+     - **Exploration Agent**: Trained with a combined reward (extrinsic + intrinsic from RND)
+     - **Exploitation Agent**: Trained with extrinsic (environment) reward only
+   - Combine rewards for exploration agent as: `combined_reward = (1 - alpha) * extrinsic + alpha * intrinsic`, with `alpha` decaying over time
+   - Both agents are optimized in parallel during training
+   - Periodically evaluate the exploitation agent for skill assessment and checkpointing
+
+4. Train the agent in stages, saving checkpoints at:
    - Random play (untrained)
    - Early learning (reaching ~50 points average)
    - Intermediate skill (reaching ~150 points average)
@@ -65,12 +85,14 @@ data/
 - PyTorch for agent implementation
 - Gymnasium (OpenAI Gym successor) for Atari environment
 - OpenCV for image processing and saving
+- **Random Network Distillation (RND) for novelty-based exploration**
 - Weights & Biases (optional) for experiment tracking
 
 ### Success Criteria
 - At least 200 total episodes recorded across all skill levels
 - Highest skill level should achieve consistent scores >200 points
 - Complete and accurate action logs corresponding to all frames
+- **Demonstrated use of RND and dual-agent setup for improved exploration and skill acquisition**
 
 ## Progress Overview (Implementation Status)
 
@@ -83,16 +105,26 @@ data/
 - **DQNAgent**: Deep Q-Network agent implemented in PyTorch, including:
   - 3-layer CNN + 2 fully connected layers for Q-value prediction
   - Input of 8 stacked frames (instead of traditional 4) for better temporal information
-  - Experience replay buffer (capacity 100,000)
+  - Experience replay buffer (capacity 1,000,000)
   - Double DQN implementation to reduce Q-value overestimation
   - HuberLoss for more robust learning
   - Target network and synchronization logic (every 500 steps)
-  - Epsilon-greedy action selection with improved exploration (1.0 to 0.1)
+  - Epsilon-greedy and softmax action selection
   - Optimized hyperparameters: learning rate 2.5e-4, batch size 128
   - Proper gradient clipping (1.0) for stable training
   - Modular, test-driven design
   - DQN training step (optimize_model) and full training loop
   - Proper device selection (CUDA/MPS/CPU) and torch.compile for speed
+- **Random Network Distillation (RND)**: Implemented in `rnd.py` and integrated into training:
+  - Fixed random target network and trainable predictor network
+  - Intrinsic reward is prediction error, normalized and scaled
+  - Used for novelty-based exploration
+- **Dual-Agent Training**: Implemented in `train_dqn.py`:
+  - **Exploration agent**: Trained with combined (extrinsic + intrinsic) reward
+  - **Exploitation agent**: Trained with extrinsic reward only
+  - Shared replay buffer
+  - Alpha parameter controls reward mixing and decays over time
+  - Both agents optimized in parallel
 - **Training Script**: `train_dqn.py` implements the full DQN training loop, including:
   - Pre-filling of replay buffer with random experiences
   - Multiple optimization steps per environment step (10x)
