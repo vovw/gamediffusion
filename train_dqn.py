@@ -150,8 +150,10 @@ def main():
         next_obs, reward, terminated, truncated, info = env.step(action)
         next_state_stack = np.roll(state_stack, shift=-1, axis=0)
         next_state_stack[-1] = next_obs
+        # Add small random priority variation during prefill
+        random_priority = random.uniform(0.1, 1.0)
         # For prefill, set intrinsic reward to 0
-        replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated)
+        replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated, random_priority)
         state_stack = next_state_stack
         if terminated or truncated:
             obs, info = env.reset()

@@ -82,6 +82,14 @@ class SumTree:
                 s -= self.tree[left]
                 idx = right
         data_idx = idx - (self.capacity - 1)
+        # Check if index is valid (within current size)
+        if data_idx >= self.size or self.data[data_idx] is None:
+            # Sample from a valid range instead
+            print(f"[DEBUG] Sampling from valid range instead of {data_idx}")
+            valid_data_idx = random.randint(0, self.size - 1)
+            data_idx = valid_data_idx
+            idx = data_idx + self.capacity - 1
+
         data = self.data[data_idx]
         if not (isinstance(data, tuple) and len(data) == 6):
             raise ValueError(f"SumTree.get: Invalid data at index {data_idx}: {data} (type={type(data)})")
@@ -152,6 +160,7 @@ class PrioritizedReplayBuffer:
         return states, actions, rewards, next_states, dones, weights, idxs
 
     def update_priorities(self, idxs, priorities):
+        print(f"[DEBUG] Max prority from priorities: {max(priorities)}")
         for idx, priority in zip(idxs, priorities):
             p = (abs(priority) + self.epsilon) ** self.alpha
             self.tree.update(idx, p)
