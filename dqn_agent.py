@@ -52,11 +52,12 @@ class SumTree:
     def __init__(self, capacity):
         self.capacity = capacity
         self.tree = np.zeros(2 * capacity - 1, dtype=np.float32)
-        self.data = np.zeros(capacity, dtype=object)
+        self.data = np.full(capacity, None, dtype=object)  # Use None for uninitialized
         self.size = 0
         self.write = 0
 
     def add(self, priority, data):
+        assert isinstance(data, tuple) and len(data) == 6, f"SumTree.add: data must be a tuple of length 6, got {type(data)} with len {len(data) if isinstance(data, tuple) else 'N/A'}: {data}"
         idx = self.write + self.capacity - 1
         self.data[self.write] = data
         self.update(idx, priority)
@@ -81,7 +82,10 @@ class SumTree:
                 s -= self.tree[left]
                 idx = right
         data_idx = idx - (self.capacity - 1)
-        return idx, self.tree[idx], self.data[data_idx]
+        data = self.data[data_idx]
+        if not (isinstance(data, tuple) and len(data) == 6):
+            raise ValueError(f"SumTree.get: Invalid data at index {data_idx}: {data} (type={type(data)})")
+        return idx, self.tree[idx], data
 
     def total(self):
         return self.tree[0]
@@ -101,10 +105,11 @@ class PrioritizedReplayBuffer:
         self.max_priority = 1.0
 
     def push(self, state, action, extrinsic_reward, intrinsic_reward, next_state, done, priority=None):
+        transition = (state, action, extrinsic_reward, intrinsic_reward, next_state, done)
+        assert isinstance(transition, tuple) and len(transition) == 6, f"PrioritizedReplayBuffer.push: transition must be tuple of length 6, got {type(transition)} with len {len(transition)}: {transition}"
         if priority is None:
             priority = self.max_priority
         p = (abs(priority) + self.epsilon) ** self.alpha
-        transition = (state, action, extrinsic_reward, intrinsic_reward, next_state, done)
         self.tree.add(p, transition)
         self.max_priority = max(self.max_priority, p)
 
@@ -114,14 +119,27 @@ class PrioritizedReplayBuffer:
         priorities = []
         segment = self.tree.total() / batch_size
         for i in range(batch_size):
-            a = segment * i
-            b = segment * (i + 1)
-            s = np.random.uniform(a, b)
-            idx, p, data = self.tree.get(s)
-            batch.append(data)
-            idxs.append(idx)
-            priorities.append(p)
-        states, actions, extrinsic_rewards, intrinsic_rewards, next_states, dones = zip(*batch)
+            while True:
+                a = segment * i
+                b = segment * (i + 1)
+                s = np.random.uniform(a, b)
+                try:
+                    idx, p, data = self.tree.get(s)
+                    batch.append(data)
+                    idxs.append(idx)
+                    priorities.append(p)
+                    break  # Only break if valid
+                except Exception as e:
+                    print(f"[DEBUG] Resampling due to invalid data: {e}")
+                    continue
+        try:
+            states, actions, extrinsic_rewards, intrinsic_rewards, next_states, dones = zip(*batch)
+        except Exception as e:
+            print("[DEBUG] Error in zip(*batch):", e)
+            print("[DEBUG] Batch contents:")
+            for i, item in enumerate(batch):
+                print(f"  batch[{i}]: type={type(item)}, value={item}")
+            raise
         if mode == 'exploration':
             rewards = [(1 - alpha) * er + alpha * ir for er, ir in zip(extrinsic_rewards, intrinsic_rewards)]
         else:
@@ -219,13 +237,20 @@ class DQNAgent:
        - Clips gradient norm to 1.0
        - Maintains stable updates
     """
-    def __init__(self, n_actions: int, state_shape, replay_buffer=None):
+    def __init__(self, n_actions: int, state_shape, replay_buffer=None, prioritized=False, per_alpha=0.6, per_beta=0.4):
         """Initialize DQN agent with networks and replay buffer."""
         self.n_actions = n_actions
         self.state_shape = state_shape
         self.policy_net = DQNCNN(state_shape, n_actions)
         self.target_net = DQNCNN(state_shape, n_actions)
-        self.replay_buffer = replay_buffer if replay_buffer is not None else ReplayBuffer(capacity=1000000)
+        self.prioritized = prioritized
+        if replay_buffer is not None:
+            self.replay_buffer = replay_buffer
+        else:
+            if prioritized:
+                self.replay_buffer = PrioritizedReplayBuffer(capacity=1000000, alpha=per_alpha, beta=per_beta)
+            else:
+                self.replay_buffer = ReplayBuffer(capacity=1000000)
         self.gamma = 0.99  # Discount factor
         self.batch_size = 128
         self.learning_rate = 3e-4
@@ -273,8 +298,16 @@ class DQNAgent:
         """Update policy network using double DQN algorithm. Mode controls reward type."""
         if len(self.replay_buffer) < self.batch_size:
             return None
-        batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
-        states, actions, rewards, next_states, dones = batch
+        # PER logic
+        if self.prioritized and isinstance(self.replay_buffer, PrioritizedReplayBuffer):
+            batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
+            states, actions, rewards, next_states, dones, weights, idxs = batch
+            weights = torch.tensor(weights, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
+        else:
+            batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
+            states, actions, rewards, next_states, dones = batch
+            weights = None
+            idxs = None
         # Convert to tensors
         states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 8, 84, 84)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)  # (B, 1)
@@ -289,7 +322,11 @@ class DQNAgent:
                 next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]
                 next_q_values = self.target_net(next_states).gather(1, next_actions)
                 target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
-            loss = nn.HuberLoss()(q_values, target_q)
+            td_errors = q_values - target_q
+            if weights is not None:
+                loss = (weights * td_errors.pow(2)).mean()
+            else:
+                loss = nn.HuberLoss()(q_values, target_q)
         self.optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -300,6 +337,10 @@ class DQNAgent:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
             self.optimizer.step()
+        # Update priorities if using PER
+        if self.prioritized and idxs is not None:
+            new_priorities = (td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
+            self.replay_buffer.update_priorities(idxs, new_priorities)
         return loss.item()
 
     def update_target_network(self):
@@ -309,4 +350,8 @@ class DQNAgent:
         Too frequent updates can lead to unstable training,
         while too infrequent updates can lead to stale targets.
         """
-        self.target_net.load_state_dict(self.policy_net.state_dict()) 
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+
+    def anneal_per_beta(self, new_beta):
+        if self.prioritized and hasattr(self.replay_buffer, 'anneal_beta'):
+            self.replay_buffer.anneal_beta(new_beta) 

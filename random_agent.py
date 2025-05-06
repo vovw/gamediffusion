@@ -16,12 +16,8 @@ class RandomAgent:
         self.n_actions = n_actions
         self.transitions = []  # Store transitions for the current episode
     
-    def select_action(self) -> int:
-        """Select a random action.
-        
-        Returns:
-            int: Random action index
-        """
+    def select_action(self, temperature: float = None) -> int:
+        """Select a random action uniformly, ignoring temperature."""
         return np.random.randint(0, self.n_actions)
     
     def record_transition(self, frame: np.ndarray, action: int, reward: float, 

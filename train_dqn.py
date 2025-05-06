@@ -16,13 +16,13 @@ config = {
     'n_actions': 4,
     'state_shape': (8, 84, 84),
     'max_episodes': 500,
-    'max_steps': 1000,
+    'max_steps': 100,
     'target_update_freq': 500,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
     'save_freq': 10,
-    'min_buffer': 50000,
+    'min_buffer': 5000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -101,7 +101,18 @@ def main():
     # --- Exploration Mode Setup ---
     exploration_mode = args.exploration_mode
     if exploration_mode == 'temperature':
-        agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=ReplayBuffer(capacity=1000000))
+        # PER hyperparameters
+        per_alpha = 0.6
+        per_beta_init = 0.4
+        per_beta_final = 1.0
+        max_episodes = config['max_episodes']
+        agent = DQNAgent(
+            n_actions=config['n_actions'],
+            state_shape=config['state_shape'],
+            prioritized=True,
+            per_alpha=per_alpha,
+            per_beta=per_beta_init
+        )
         # Temperature annealing params
         temp_init = 1.0
         temp_min = 0.05
@@ -161,6 +172,9 @@ def main():
         if exploration_mode == 'temperature':
             # Anneal temperature
             temperature = max(temp_min, temp_init * (temp_decay ** episode))
+            # Anneal PER beta linearly with episode (same schedule as temperature)
+            per_beta = min(per_beta_final, per_beta_init + (per_beta_final - per_beta_init) * (episode / max_episodes))
+            agent.anneal_per_beta(per_beta)
             for step in range(config['max_steps']):
                 action = agent.select_action(state_stack, mode='softmax', temperature=temperature)
                 next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
@@ -201,6 +215,13 @@ def main():
                 'temp': f"{temperature:.3f}",
                 'loss': f"{avg_loss:.4f}"
             })
+
+            if episode > 0 and episode % 10 == 0:
+                last_10_explore = exploration_rewards[-10:]
+                last_10_exploit = exploitation_rewards[-10:]
+                print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str}")
+      
+                
         else:
             # --- RND mode (original logic) ---
             for step in range(config['max_steps']):

@@ -24,6 +24,7 @@ Arguments:
     --output_dir: Directory to save videos (default: 'videos')
     --skill_level: Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.
     --no_sync: Set to True to use a non-synced directory for video output (default: False)
+    --temperature: Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)
 
 Output:
     - Random agent videos: random_agent_episode_X.mp4
@@ -66,14 +67,14 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward):
     
     return frame_with_text
 
-def record_episode(env, agent, video_writer):
+def record_episode(env, agent, video_writer, temperature=1.0):
     """Record a single episode."""
     obs, info = env.reset()
     # Initialize state stack for DQN
     state_stack = np.stack([obs] * 8, axis=0)
     cumulative_reward = 0
     frame_num = 0
-    max_steps = 1000
+    max_steps = 100
     while True:
         if frame_num > max_steps:
             break
@@ -82,9 +83,13 @@ def record_episode(env, agent, video_writer):
             print("Warning: Received empty frame from environment. Skipping frame.")
             continue
         # Get action from agent
-        if isinstance(agent, DQNAgent):
-            action = agent.select_action(state_stack)
-        else:  # RandomAgent
+        if hasattr(agent, 'select_action'):
+            if agent.__class__.__name__ == 'DQNAgent':
+                mode = 'softmax' if temperature is not None and not np.isinf(temperature) else 'greedy'
+                action = agent.select_action(state_stack, mode=mode, temperature=temperature)
+            else:
+                action = agent.select_action(temperature=temperature)
+        else:
             action = agent.select_action()
         frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward)
         if frame_with_overlay is not None:
@@ -92,7 +97,7 @@ def record_episode(env, agent, video_writer):
         next_obs, reward, terminated, truncated, info = env.step(action)
         cumulative_reward += reward
         frame_num += 1
-        if isinstance(agent, DQNAgent):
+        if agent.__class__.__name__ == 'DQNAgent':
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
         if terminated or truncated:
@@ -103,7 +108,7 @@ def record_episode(env, agent, video_writer):
             break
     return cumulative_reward
 
-def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None, no_sync=False):
+def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None, no_sync=False, temperature=1.0):
     """Record gameplay videos for both random and trained agents.
     
     Args:
@@ -112,6 +117,7 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
         skill_level: If specified (0-3), load that skill level's checkpoint.
                     If None, use latest checkpoint.
         no_sync: If True, use a temporary directory and copy files to output_dir after completion
+        temperature: Softmax temperature for action selection (default: 1.0)
     """
     # Use a temporary directory if no_sync is True
     temp_dir = None
@@ -199,7 +205,7 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
         if not video_writer.isOpened():
             print(f"Error: Could not open video writer for {video_path}")
             continue
-        reward = record_episode(env, random_agent, video_writer)
+        reward = record_episode(env, random_agent, video_writer, temperature=temperature)
         video_writer.release()
         time.sleep(0.5)
         file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
@@ -215,7 +221,7 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
         if not video_writer.isOpened():
             print(f"Error: Could not open video writer for {video_path}")
             continue
-        reward = record_episode(env, dqn_agent, video_writer)
+        reward = record_episode(env, dqn_agent, video_writer, temperature=temperature)
         video_writer.release()
         time.sleep(0.5)
         file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
@@ -251,11 +257,13 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='videos', help='Directory to save videos')
     parser.add_argument('--skill_level', type=int, choices=[0,1,2,3], help='Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.')
     parser.add_argument('--no_sync', action='store_true', help='Use a temporary directory to avoid iCloud sync issues')
+    parser.add_argument('--temperature', type=float, default=1.0, help='Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)')
     args = parser.parse_args()
     
     record_gameplay_videos(
         num_episodes=args.num_episodes,
         output_dir=args.output_dir,
         skill_level=args.skill_level,
-        no_sync=args.no_sync
+        no_sync=args.no_sync,
+        temperature=args.temperature
     )
