@@ -47,6 +47,104 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
+class SumTree:
+    """SumTree data structure for efficient sampling and priority updates."""
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1, dtype=np.float32)
+        self.data = np.zeros(capacity, dtype=object)
+        self.size = 0
+        self.write = 0
+
+    def add(self, priority, data):
+        idx = self.write + self.capacity - 1
+        self.data[self.write] = data
+        self.update(idx, priority)
+        self.write = (self.write + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def update(self, idx, priority):
+        change = priority - self.tree[idx]
+        self.tree[idx] = priority
+        while idx != 0:
+            idx = (idx - 1) // 2
+            self.tree[idx] += change
+
+    def get(self, s):
+        idx = 0
+        while idx < self.capacity - 1:
+            left = 2 * idx + 1
+            right = left + 1
+            if s <= self.tree[left]:
+                idx = left
+            else:
+                s -= self.tree[left]
+                idx = right
+        data_idx = idx - (self.capacity - 1)
+        return idx, self.tree[idx], self.data[data_idx]
+
+    def total(self):
+        return self.tree[0]
+
+    def __len__(self):
+        return self.size
+
+class PrioritizedReplayBuffer:
+    """Prioritized Experience Replay Buffer using a sum-tree."""
+    def __init__(self, capacity, alpha=0.6, beta=0.4):
+        self.capacity = capacity
+        self.alpha = alpha
+        self.beta = beta
+        self.beta_initial = beta
+        self.epsilon = 1e-6
+        self.tree = SumTree(capacity)
+        self.max_priority = 1.0
+
+    def push(self, state, action, extrinsic_reward, intrinsic_reward, next_state, done, priority=None):
+        if priority is None:
+            priority = self.max_priority
+        p = (abs(priority) + self.epsilon) ** self.alpha
+        transition = (state, action, extrinsic_reward, intrinsic_reward, next_state, done)
+        self.tree.add(p, transition)
+        self.max_priority = max(self.max_priority, p)
+
+    def sample(self, batch_size, mode='exploration', alpha=0.5):
+        batch = []
+        idxs = []
+        priorities = []
+        segment = self.tree.total() / batch_size
+        for i in range(batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = np.random.uniform(a, b)
+            idx, p, data = self.tree.get(s)
+            batch.append(data)
+            idxs.append(idx)
+            priorities.append(p)
+        states, actions, extrinsic_rewards, intrinsic_rewards, next_states, dones = zip(*batch)
+        if mode == 'exploration':
+            rewards = [(1 - alpha) * er + alpha * ir for er, ir in zip(extrinsic_rewards, intrinsic_rewards)]
+        else:
+            rewards = extrinsic_rewards
+        priorities = np.array(priorities, dtype=np.float32)
+        probs = priorities / (self.tree.total() + 1e-8)
+        weights = (len(self.tree) * probs) ** (-self.beta)
+        weights /= weights.max() + 1e-8
+        weights = weights.astype(np.float32)
+        return states, actions, rewards, next_states, dones, weights, idxs
+
+    def update_priorities(self, idxs, priorities):
+        for idx, priority in zip(idxs, priorities):
+            p = (abs(priority) + self.epsilon) ** self.alpha
+            self.tree.update(idx, p)
+            self.max_priority = max(self.max_priority, p)
+
+    def anneal_beta(self, new_beta):
+        self.beta = new_beta
+
+    def __len__(self):
+        return len(self.tree)
+
 class DQNCNN(nn.Module):
     """CNN architecture for DQN, based on the original DQN paper.
     
