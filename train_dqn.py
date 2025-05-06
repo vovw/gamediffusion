@@ -224,7 +224,6 @@ def main():
                 print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str}")
                 print(f"\n--- PER Diagnostics at Episode {episode} ---")
                 per_stats = agent.diagnostic_sampling_comparison()
-                print(per_stats)
                 
                 
         else:
