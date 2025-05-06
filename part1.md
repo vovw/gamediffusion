@@ -1,7 +1,53 @@
-# Part 1: Recording Agent Gameplay Videos
+# Part 1: DQN Training with Exploration Modes
 
 ## Overview
-In this first part, we'll train an RL agent to play Atari Breakout and record its gameplay at different proficiency levels. This will give us the raw data needed for training our world model in later parts.
+
+This project now supports two exploration strategies for DQN training in Atari Breakout:
+
+### 1. Temperature-based Exploration (Default)
+- **Action selection:** Softmax over Q-values with a temperature parameter.
+- **Temperature annealing:**
+  - Initial temperature: 1.0
+  - Minimum temperature: 0.05
+  - Exponential decay per episode: 0.995
+- **Reward:** Only extrinsic (environment) reward is used. No intrinsic or combined reward is tracked in this mode.
+- **Usage:**
+  ```bash
+  python train_dqn.py
+  ```
+- **Logging:** Progress bar shows extrinsic reward as `reward` and the current temperature as `temp`.
+
+### 2. RND-based Exploration (Optional)
+- **Action selection:** Dual-agent setup with Random Network Distillation (RND) for intrinsic motivation.
+- **Combined reward:** Weighted sum of extrinsic and intrinsic rewards, controlled by `alpha`.
+- **Usage:**
+  ```bash
+  python train_dqn.py --exploration_mode rnd
+  ```
+- **Logging:** Progress bar shows both combined and extrinsic rewards, as well as `alpha`.
+
+## Command-Line Arguments
+- `--exploration_mode`: Choose between `temperature` (default) and `rnd`.
+- Other arguments for controlling episodes, buffer size, and saving remain unchanged.
+
+## Refactoring Notes
+- The training loop, buffer prefill, evaluation, and checkpointing are all mode-aware.
+- The code is modular and clear, with minimal risk of introducing bugs.
+- Only the relevant rewards are tracked and logged for each mode.
+
+## Example Usage
+- **Default (temperature):**
+  ```bash
+  python train_dqn.py
+  ```
+- **RND mode:**
+  ```bash
+  python train_dqn.py --exploration_mode rnd
+  ```
+
+---
+
+This update improves clarity, maintainability, and flexibility for experimentation with different exploration strategies in DQN training.
 
 ## Related Components
 - [part2.md](part2.md): Uses these videos to learn latent actions
