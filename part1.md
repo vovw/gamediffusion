@@ -5,17 +5,22 @@
 This project now supports two exploration strategies for DQN training in Atari Breakout:
 
 ### 1. Temperature-based Exploration (Default)
-- **Action selection:** Softmax over Q-values with a temperature parameter.
+- **Action selection:** Softmax over Q-values with a temperature parameter (Boltzmann exploration).
 - **Temperature annealing:**
   - Initial temperature: 1.0
   - Minimum temperature: 0.05
-  - Exponential decay per episode: 0.995
+  - Exponential decay per episode: 0.995 (slowed by a factor of 3 for smoother annealing)
+- **Prioritized Experience Replay (PER):**
+  - Enabled by default in this mode.
+  - Uses a sum-tree for efficient sampling and priority updates.
+  - Alpha (priority exponent) and beta (importance sampling correction) are annealed during training.
+  - Importance sampling weights are applied to the loss for bias correction.
 - **Reward:** Only extrinsic (environment) reward is used. No intrinsic or combined reward is tracked in this mode.
 - **Usage:**
   ```bash
   python train_dqn.py
   ```
-- **Logging:** Progress bar shows extrinsic reward as `reward` and the current temperature as `temp`.
+- **Logging:** Progress bar shows extrinsic reward as `reward`, the current temperature as `temp`, and loss. PER diagnostics are periodically printed.
 
 ### 2. RND-based Exploration (Optional)
 - **Action selection:** Dual-agent setup with Random Network Distillation (RND) for intrinsic motivation.
@@ -68,9 +73,10 @@ This update improves clarity, maintainability, and flexibility for experimentati
 1. Implement a DQN (Deep Q-Network) agent using PyTorch
    - Use a simple CNN architecture (3 convolutional layers + 2 fully connected)
    - 8-frame stacking for better temporal information
+   - **Prioritized Experience Replay (PER) with sum-tree for efficient sampling and priority updates**
    - Experience replay buffer with capacity of 1,000,000 transitions
    - Target network update frequency of 500 steps
-   - Epsilon-greedy and softmax exploration
+   - Epsilon-greedy and softmax exploration (temperature-based)
    - Learning rate of 0.0001–0.00025 with Adam optimizer
    - Batch size of 128 for training
    - Double DQN implementation to reduce Q-value overestimation
@@ -139,6 +145,7 @@ data/
 - Highest skill level should achieve consistent scores >200 points
 - Complete and accurate action logs corresponding to all frames
 - **Demonstrated use of RND and dual-agent setup for improved exploration and skill acquisition**
+- **Demonstrated use of Prioritized Experience Replay (PER) and temperature-based softmax exploration for improved sample efficiency and learning**
 
 ## Progress Overview (Implementation Status)
 
@@ -222,11 +229,12 @@ data/
    - Need to update network architecture to handle larger input size
    - Keep 8-frame stacking for temporal information (currently implemented)
 
-3. ❌ **Implement Prioritized Experience Replay**
-   - **Status: Not implemented**
-   - Need to implement sum-tree data structure
-   - Need to modify sampling to use priorities
-   - Need to implement importance sampling weights
+3. ✅ **Implement Prioritized Experience Replay**
+   - **Status: Implemented**
+   - Prioritized Experience Replay (PER) is now implemented using a sum-tree data structure for efficient sampling and priority updates (see `dqn_agent.py`).
+   - Supports alpha (priority exponent), beta (importance sampling correction), and dynamic priority updates after each optimization step.
+   - Importance sampling weights are used to correct for bias during training.
+   - PER is enabled by default in temperature-based exploration mode.
 
 4. ✅ **Implement Reward Shaping**
    - Living penalty of -0.001 per time step implemented
