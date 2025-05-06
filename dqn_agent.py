@@ -364,3 +364,86 @@ class DQNAgent:
     def anneal_per_beta(self, new_beta):
         if self.prioritized and hasattr(self.replay_buffer, 'anneal_beta'):
             self.replay_buffer.anneal_beta(new_beta) 
+
+    def diagnostic_sampling_comparison(self, batch_size=128, num_batches=10):
+        """Compare average TD errors from prioritized vs random sampling"""
+        if len(self.replay_buffer) < batch_size:
+            return None
+        
+        # Track average TD errors
+        prioritized_td_errors = []
+        random_td_errors = []
+        
+        for _ in range(num_batches):
+            # 1. Get a batch using prioritized sampling
+            if self.prioritized:
+                per_batch = self.replay_buffer.sample(batch_size)
+                per_states, per_actions, per_rewards, per_next_states, per_dones, per_weights, per_idxs = per_batch
+            
+            # 2. Get a batch using uniform random sampling
+            # Create a temporary random sample (don't use RandomReplayBuffer to avoid extra class)
+            random_indices = np.random.randint(0, len(self.replay_buffer), size=batch_size)
+            random_batch = []
+            for idx in random_indices:
+                # Access the underlying data directly (may need to adjust based on your implementation)
+                data_idx = idx % self.replay_buffer.capacity  # Wrap around
+                if hasattr(self.replay_buffer, 'tree'):
+                    data = self.replay_buffer.tree.data[data_idx]
+                else:
+                    # For regular buffer
+                    data = list(self.replay_buffer.buffer)[data_idx]
+                if data is not None:
+                    random_batch.append(data)
+            
+            if len(random_batch) < batch_size:
+                continue  # Skip if not enough valid samples
+                
+            # Unpack random batch
+            rand_states, rand_actions, rand_extrinsic_rewards, rand_intrinsic_rewards, rand_next_states, rand_dones = zip(*random_batch)
+            
+            # Convert to tensors for both batches
+            per_states_tensor = torch.from_numpy(np.stack(per_states)).to(self.device).float() / 255.0
+            per_actions_tensor = torch.tensor(per_actions, dtype=torch.long, device=self.device).unsqueeze(1)
+            per_next_states_tensor = torch.from_numpy(np.stack(per_next_states)).to(self.device).float() / 255.0
+            per_dones_tensor = torch.tensor(per_dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+            
+            rand_states_tensor = torch.from_numpy(np.stack(rand_states)).to(self.device).float() / 255.0
+            rand_actions_tensor = torch.tensor(rand_actions, dtype=torch.long, device=self.device).unsqueeze(1)
+            rand_next_states_tensor = torch.from_numpy(np.stack(rand_next_states)).to(self.device).float() / 255.0
+            rand_dones_tensor = torch.tensor(rand_dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+            
+            # Calculate TD errors for both batches using your neural networks
+            with torch.no_grad():
+                # For prioritized batch
+                per_q_values = self.policy_net(per_states_tensor).gather(1, per_actions_tensor)
+                per_next_actions = self.policy_net(per_next_states_tensor).max(1, keepdim=True)[1]
+                per_next_q_values = self.target_net(per_next_states_tensor).gather(1, per_next_actions)
+                per_target_q = per_rewards + self.gamma * per_next_q_values * (1.0 - per_dones_tensor)
+                per_td_error = (per_q_values - per_target_q).abs().mean().item()
+                prioritized_td_errors.append(per_td_error)
+                
+                # For random batch
+                rand_q_values = self.policy_net(rand_states_tensor).gather(1, rand_actions_tensor)
+                rand_next_actions = self.policy_net(rand_next_states_tensor).max(1, keepdim=True)[1]
+                rand_next_q_values = self.target_net(rand_next_states_tensor).gather(1, rand_next_actions)
+                rand_target_q = rand_rewards + self.gamma * rand_next_q_values * (1.0 - rand_dones_tensor)
+                rand_td_error = (rand_q_values - rand_target_q).abs().mean().item()
+                random_td_errors.append(rand_td_error)
+        
+        # Calculate overall stats
+        avg_prioritized_td = np.mean(prioritized_td_errors)
+        avg_random_td = np.mean(random_td_errors)
+        improvement_ratio = avg_prioritized_td / avg_random_td if avg_random_td > 0 else 0
+        
+        result = {
+            'avg_prioritized_td_error': avg_prioritized_td,
+            'avg_random_td_error': avg_random_td,
+            'improvement_ratio': improvement_ratio,
+            'prioritized_td_errors': prioritized_td_errors,
+            'random_td_errors': random_td_errors
+        }
+        
+        print(f"PER Diagnostics: Prioritized TD Error = {avg_prioritized_td:.6f}, Random TD Error = {avg_random_td:.6f}")
+        print(f"Improvement Ratio: {improvement_ratio:.3f}x (higher is better for PER)")
+        
+        return result

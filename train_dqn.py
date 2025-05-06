@@ -222,7 +222,10 @@ def main():
                 last_10_explore = exploration_rewards[-10:]
                 last_10_exploit = exploitation_rewards[-10:]
                 print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str}")
-      
+                print(f"\n--- PER Diagnostics at Episode {episode} ---")
+                per_stats = agent.diagnostic_sampling_comparison()
+                print(per_stats)
+                
                 
         else:
             # --- RND mode (original logic) ---
