@@ -74,7 +74,7 @@ def record_episode(env, agent, video_writer, temperature=1.0):
     state_stack = np.stack([obs] * 8, axis=0)
     cumulative_reward = 0
     frame_num = 0
-    max_steps = 100
+    max_steps = 1000
     while True:
         if frame_num > max_steps:
             break
