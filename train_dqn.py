@@ -15,14 +15,14 @@ config = {
     'env_name': 'Breakout',
     'n_actions': 4,
     'state_shape': (8, 84, 84),
-    'max_episodes': 500,
+    'max_episodes': 10000,
     'max_steps': 1000,
     'target_update_freq': 200,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
     'save_freq': 10,
-    'min_buffer': 50000,
+    'min_buffer': 100000,
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
@@ -115,8 +115,8 @@ def main():
         )
         # Temperature annealing params
         temp_init = 1.0
-        temp_min = 0.05
-        temp_decay = 0.995**(1/3) # 3 times slower than default
+        temp_min = 0.2
+        temp_decay = 0.995**(1/5) # 3 times slower than default
     else:
         shared_replay_buffer = ReplayBuffer(capacity=1000000)
         exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
