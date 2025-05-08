@@ -26,6 +26,7 @@ config = {
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
+    'epsilon': 0.05,  # Epsilon for epsilon-greedy exploration
 }
 
 # Set seeds and deterministic flags
@@ -116,7 +117,7 @@ def main():
         # Temperature annealing params
         temp_init = 1.0
         temp_min = 0.2
-        temp_decay = 0.995**(1/5) # 3 times slower than default
+        temp_decay = 0.995**(1/3) # 3 times slower than default
     else:
         shared_replay_buffer = ReplayBuffer(capacity=1000000)
         exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
@@ -178,7 +179,7 @@ def main():
             per_beta = min(per_beta_final, per_beta_init + (per_beta_final - per_beta_init) * (episode / max_episodes))
             agent.anneal_per_beta(per_beta)
             for step in range(config['max_steps']):
-                action = agent.select_action(state_stack, mode='softmax', temperature=temperature)
+                action = agent.select_action(state_stack, mode='softmax', temperature=temperature, epsilon=config['epsilon'])
                 next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
                 next_state_stack = np.roll(state_stack, shift=-1, axis=0)
                 next_state_stack[-1] = next_obs
@@ -229,7 +230,7 @@ def main():
         else:
             # --- RND mode (original logic) ---
             for step in range(config['max_steps']):
-                action = exploration_agent.select_action(state_stack, mode='softmax', temperature=1.0)
+                action = exploration_agent.select_action(state_stack, mode='softmax', temperature=1.0, epsilon=config['epsilon'])
                 next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
                 next_state_stack = np.roll(state_stack, shift=-1, axis=0)
                 next_state_stack[-1] = next_obs

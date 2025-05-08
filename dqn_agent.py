@@ -290,23 +290,26 @@ class DQNAgent:
         if hasattr(torch, 'compile') and self.device.type == 'cuda':
             self.policy_net = torch.compile(self.policy_net)
 
-    def select_action(self, state, mode: str = 'greedy', temperature: float = 1.0) -> int:
-        """Select action using greedy (argmax) or softmax policy."""
-        state_tensor = torch.from_numpy(state).unsqueeze(0)  # (1, 8, 84, 84)
-        if torch.cuda.is_available():
-            state_tensor = state_tensor.cuda()
-            self.policy_net.cuda()
-        elif torch.backends.mps.is_available():
-            state_tensor = state_tensor.to('mps')
-            self.policy_net.to('mps')
-        else:
-            state_tensor = state_tensor.cpu()
-            self.policy_net.cpu()
+    def select_action(self, state, mode: str = 'greedy', temperature: float = 1.0, epsilon: float = 0.0) -> int:
+        """
+        Select action using specified exploration strategy.
+        
+        Args:
+            state: Current state
+            mode: 'greedy' or 'softmax'
+            temperature: Temperature for softmax exploration
+            epsilon: Probability of random action (for training only)
+        """
+        # Epsilon-greedy component (for training only)
+        if epsilon > 0 and random.random() < epsilon:
+            return random.randint(0, self.n_actions - 1)
+        
+        # Normal policy-based selection (without normalization)
+        state_tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
         self.policy_net.eval()
         with torch.no_grad():
             q_values = self.policy_net(state_tensor)
-            q_values = q_values - q_values.mean(dim=1, keepdim=True)
-            q_values = q_values / (q_values.std(dim=1, keepdim=True) + 1e-8)
+            # No normalization here
             if mode == 'softmax':
                 # Softmax action selection (Boltzmann exploration)
                 logits = q_values / max(temperature, 1e-6)
