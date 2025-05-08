@@ -474,3 +474,20 @@ class DQNAgent:
         print(f"Improvement Ratio: {improvement_ratio:.3f}x (higher is better for PER)")
         
         return result
+
+    def get_action_softmax_probs(self, state, temperature: float = 1.0):
+        """
+        Return softmax probabilities for all actions given a state and temperature.
+        Args:
+            state: Current state (np.ndarray)
+            temperature: Softmax temperature
+        Returns:
+            probs: np.ndarray of shape (n_actions,)
+        """
+        state_tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
+        self.policy_net.eval()
+        with torch.no_grad():
+            q_values = self.policy_net(state_tensor)
+            logits = q_values / max(temperature, 1e-6)
+            probs = torch.softmax(logits, dim=1).cpu().numpy().flatten()
+        return probs
