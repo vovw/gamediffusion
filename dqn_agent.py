@@ -85,7 +85,7 @@ class SumTree:
         # Check if index is valid (within current size)
         if data_idx >= self.size or self.data[data_idx] is None:
             # Sample from a valid range instead
-            print(f"[DEBUG] Sampling from valid range instead of {data_idx}")
+            #print(f"[DEBUG] Sampling from valid range instead of {data_idx}")
             valid_data_idx = random.randint(0, self.size - 1)
             data_idx = valid_data_idx
             idx = data_idx + self.capacity - 1
@@ -369,7 +369,7 @@ class DQNAgent:
             self.optimizer.step()
         # Update priorities if using PER
         if self.prioritized and idxs is not None:
-            scaling_factor = 10
+            scaling_factor = 3
             scaled_td_errors = td_errors * scaling_factor  # Scale by a factor of 10
             new_priorities = (scaled_td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
             #print(f"[DEBUG] New priorities - Max: {new_priorities.max():.6f}, Mean: {new_priorities.mean():.6f}")

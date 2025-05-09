@@ -65,7 +65,8 @@ class AtariBreakoutEnv:
             self.lives = lives
         
         # Apply living penalty and life loss penalty
-        shaped_reward = reward + self.living_penalty + life_loss_reward
+        #shaped_reward = reward + self.living_penalty + life_loss_reward
+        shaped_reward = reward
         
         processed_obs = self.preprocess_observation(obs)
         return processed_obs, shaped_reward, terminated, truncated, info

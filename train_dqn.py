@@ -9,6 +9,8 @@ import json
 import random
 import argparse
 from rnd import RandomNetworkDistillation
+import csv
+import time
 
 # Config
 config = {
@@ -17,7 +19,7 @@ config = {
     'state_shape': (8, 84, 84),
     'max_episodes': 10000,
     'max_steps': 1000,
-    'target_update_freq': 200,
+    'target_update_freq': 100,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -26,7 +28,7 @@ config = {
     'seed': 42,
     'skill_thresholds': [0, 50, 150, 250],
     'episodes_per_skill': 50,
-    'epsilon': 0.05,  # Epsilon for epsilon-greedy exploration
+    'epsilon': 0.1,  # Epsilon for epsilon-greedy exploration
 }
 
 # Set seeds and deterministic flags
@@ -59,16 +61,33 @@ def save_episode_data(frames, actions, rewards, skill_level, episode_idx, config
         json.dump(all_actions, f, indent=2)
 
 
-def evaluate_agent(agent, env, n_episodes=10):
-    """Evaluate agent and return average reward."""
+def evaluate_agent(agent, env, n_episodes=10, log_id=None):
+    """Evaluate agent and return average reward. Logs Q-values, softmax probabilities, and actions to CSV."""
     rewards = []
-    for _ in range(n_episodes):
+    log_rows = []
+    for ep in range(n_episodes):
         obs, info = env.reset()
         state_stack = np.stack([obs] * 8, axis=0)
         done = False
         total_reward = 0
         for step in range(config['max_steps']):
-            action = agent.select_action(state_stack)  # Always greedy
+            # Get Q-values and softmax probabilities
+            state_tensor = torch.from_numpy(state_stack).unsqueeze(0).to(agent.device)
+            agent.policy_net.eval()
+            with torch.no_grad():
+                q_values_tensor = agent.policy_net(state_tensor)
+                q_values = q_values_tensor.cpu().numpy().flatten()
+                logits = q_values_tensor / 1.0  # t=1
+                probs = torch.softmax(logits, dim=1).cpu().numpy().flatten()
+                action = int(torch.argmax(q_values_tensor, dim=1).item())
+            # Log row
+            log_rows.append({
+                'episode': ep,
+                'step': step,
+                'q_values': ','.join(f'{q:.4f}' for q in q_values),
+                'probabilities': ','.join(f'{p:.4f}' for p in probs),
+                'action_selected': action
+            })
             next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
@@ -77,6 +96,17 @@ def evaluate_agent(agent, env, n_episodes=10):
             if done:
                 break
         rewards.append(total_reward)
+    # Save CSV log
+    os.makedirs('eval_logs', exist_ok=True)
+    if log_id is None:
+        log_id = time.strftime('%Y%m%d_%H%M%S')
+    csv_path = os.path.join('eval_logs', f'eval_log_{log_id}.csv')
+    with open(csv_path, 'w', newline='') as csvfile:
+        fieldnames = ['episode', 'step', 'q_values', 'probabilities', 'action_selected']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in log_rows:
+            writer.writerow(row)
     return np.mean(rewards)
 
 
@@ -116,8 +146,8 @@ def main():
         )
         # Temperature annealing params
         temp_init = 1.0
-        temp_min = 0.2
-        temp_decay = 0.995**(1/3) # 3 times slower than default
+        temp_min = 0.01
+        temp_decay = 0.995**(1/5) # 3 times slower than default
     else:
         shared_replay_buffer = ReplayBuffer(capacity=1000000)
         exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
