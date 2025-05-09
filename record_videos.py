@@ -129,9 +129,10 @@ def record_episode(env, agent, video_writer, temperature=1.0, frame_size=None, d
         softmax_probs = None
         if hasattr(agent, 'select_action'):
             if agent.__class__.__name__ == 'DQNAgent':
-                mode = 'softmax' if temperature is not None and not np.isinf(temperature) else 'greedy'
+                # Use 'greedy' mode by default, 'softmax' only if temperature is not None and not inf
+                mode = 'softmax' if (temperature is not None and not np.isinf(temperature)) else 'greedy'
                 if mode == 'softmax':
-                    softmax_probs = agent.get_action_softmax_probs(state_stack, temperature=1.0) #always get 1 softmax for probabilities
+                    softmax_probs = agent.get_action_softmax_probs(state_stack, temperature=temperature)
                 action = agent.select_action(state_stack, mode=mode, temperature=temperature)
             else:
                 action = agent.select_action(temperature=temperature)

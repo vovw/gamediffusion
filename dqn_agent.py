@@ -309,12 +309,17 @@ class DQNAgent:
         self.policy_net.eval()
         with torch.no_grad():
             q_values = self.policy_net(state_tensor)
-            # No normalization here
             if mode == 'softmax':
                 # Softmax action selection (Boltzmann exploration)
                 logits = q_values / max(temperature, 1e-6)
                 probs = torch.softmax(logits, dim=1)
                 action = int(torch.multinomial(probs, num_samples=1).item())
+            elif mode == 'greedy':
+                # Greedy with 5% random action
+                if np.random.rand() < 0.05:
+                    action = np.random.randint(0, self.n_actions)
+                else:
+                    action = int(torch.argmax(q_values, dim=1).item())
             else:
                 action = int(torch.argmax(q_values, dim=1).item())
         return action

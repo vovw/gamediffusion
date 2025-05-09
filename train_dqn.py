@@ -80,6 +80,7 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
                     action = np.random.randint(0, config['n_actions'])
                 else:
                     action = int(np.argmax(q_values))
+            probs = np.exp(q_values) / np.sum(np.exp(q_values))
             log_rows.append({
                 'episode': ep,
                 'step': step,
@@ -173,9 +174,10 @@ def main():
         next_state_stack = np.roll(state_stack, shift=-1, axis=0)
         next_state_stack[-1] = next_obs
         # Add small random priority variation during prefill
-        random_priority = random.uniform(0.1, 1.0)
+        #random_priority = random.uniform(0.1, 1.0)
         # For prefill, set intrinsic reward to 0
-        replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated, random_priority)
+        #replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated, random_priority)
+        replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated)
         state_stack = next_state_stack
         if terminated or truncated:
             obs, info = env.reset()
