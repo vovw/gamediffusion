@@ -79,7 +79,8 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
                 q_values = q_values_tensor.cpu().numpy().flatten()
                 logits = q_values_tensor / 1.0  # t=1
                 probs = torch.softmax(logits, dim=1).cpu().numpy().flatten()
-                action = int(torch.argmax(q_values_tensor, dim=1).item())
+                #action = int(torch.argmax(q_values_tensor, dim=1).item())
+                action = np.random.choice(range(config['n_actions']), p=probs)
             # Log row
             log_rows.append({
                 'episode': ep,
@@ -195,6 +196,14 @@ def main():
     eval_env = AtariBreakoutEnv()
 
     for episode in pbar:
+        # Periodic evaluation
+        if episode % 10 == 0:
+            log_id = f"ep{episode}"
+            eval_reward = evaluate_agent(agent, eval_env, n_episodes=5, log_id=log_id)
+            policy_str = f"Policy eval: {eval_reward:.1f}"
+        else:
+            policy_str = ""
+
         obs, info = env.reset()
         state_stack = np.stack([obs] * 8, axis=0)
         frames, actions, extrinsic_rewards, intrinsic_rewards = [obs], [], [], []
@@ -236,12 +245,7 @@ def main():
             exploitation_rewards.append(total_extrinsic_reward)
             running_avg = np.mean(exploration_rewards[-min(100, len(exploration_rewards)):])
             running_avg_rewards.append(running_avg)
-            # Periodic evaluation
-            if episode % 10 == 0:
-                eval_reward = evaluate_agent(agent, eval_env, n_episodes=5)
-                policy_str = f"Policy eval: {eval_reward:.1f}"
-            else:
-                policy_str = ""
+            
             pbar.set_postfix({
                 'explore_r': total_combined_reward,
                 'exploit_r': total_extrinsic_reward,
@@ -299,7 +303,8 @@ def main():
             running_avg_rewards.append(running_avg)
             alpha = max(min_alpha, alpha * alpha_decay)
             if episode % 10 == 0:
-                eval_reward = evaluate_agent(exploitation_agent, eval_env, n_episodes=5)
+                log_id = f"ep{episode}"
+                eval_reward = evaluate_agent(exploitation_agent, eval_env, n_episodes=5, log_id=log_id)
                 policy_str = f"Policy eval: {eval_reward:.1f}"
             else:
                 policy_str = ""

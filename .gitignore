@@ -4,3 +4,4 @@ __pycache__/
 data/
 checkpoints/
 videos/
+eval_logs/
