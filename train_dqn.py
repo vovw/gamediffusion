@@ -19,7 +19,7 @@ config = {
     'state_shape': (8, 84, 84),
     'max_episodes': 10000,
     'max_steps': 1000,
-    'target_update_freq': 100,
+    'target_update_freq': 1000,
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -71,17 +71,15 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
         done = False
         total_reward = 0
         for step in range(config['max_steps']):
-            # Get Q-values and softmax probabilities
             state_tensor = torch.from_numpy(state_stack).unsqueeze(0).to(agent.device)
             agent.policy_net.eval()
             with torch.no_grad():
                 q_values_tensor = agent.policy_net(state_tensor)
                 q_values = q_values_tensor.cpu().numpy().flatten()
-                logits = q_values_tensor / 1.0  # t=1
-                probs = torch.softmax(logits, dim=1).cpu().numpy().flatten()
-                #action = int(torch.argmax(q_values_tensor, dim=1).item())
-                action = np.random.choice(range(config['n_actions']), p=probs)
-            # Log row
+                if np.random.rand() < 0.05:
+                    action = np.random.randint(0, config['n_actions'])
+                else:
+                    action = int(np.argmax(q_values))
             log_rows.append({
                 'episode': ep,
                 'step': step,
@@ -117,7 +115,7 @@ def main():
     parser.add_argument('--min_buffer', type=int, default=None)
     parser.add_argument('--save_freq', type=int, default=None)
     parser.add_argument('--no_save', action='store_true', help='Do not save frames or actions during training')
-    parser.add_argument('--exploration_mode', type=str, choices=['temperature', 'rnd'], default='temperature', help='Exploration mode: temperature (default) or rnd')
+    parser.add_argument('--exploration_mode', type=str, choices=['epsilon'], default='epsilon', help='Exploration mode: epsilon-greedy (default)')
     args = parser.parse_args()
     # Override config if args provided
     if args.max_episodes is not None:
@@ -132,23 +130,15 @@ def main():
 
     # --- Exploration Mode Setup ---
     exploration_mode = args.exploration_mode
-    if exploration_mode == 'temperature':
-        # PER hyperparameters
-        per_alpha = 0.8
-        per_beta_init = 0.4
-        per_beta_final = 1.0
-        max_episodes = config['max_episodes']
+    if exploration_mode == 'epsilon':
         agent = DQNAgent(
             n_actions=config['n_actions'],
             state_shape=config['state_shape'],
-            prioritized=True,
-            per_alpha=per_alpha,
-            per_beta=per_beta_init
+            prioritized=False,  # Use random replay buffer
         )
-        # Temperature annealing params
-        temp_init = 1.0
-        temp_min = 0.01
-        temp_decay = 0.995**(1/5) # 3 times slower than default
+        epsilon_start = 1.0
+        epsilon_final = 0.1
+        epsilon_decay_steps = 1_000_000
     else:
         shared_replay_buffer = ReplayBuffer(capacity=1000000)
         exploration_agent = DQNAgent(n_actions=config['n_actions'], state_shape=config['state_shape'], replay_buffer=shared_replay_buffer)
@@ -176,7 +166,7 @@ def main():
     env = AtariBreakoutEnv()
     obs, info = env.reset()
     state_stack = np.stack([obs] * 8, axis=0)
-    replay_buffer = agent.replay_buffer if exploration_mode == 'temperature' else shared_replay_buffer
+    replay_buffer = agent.replay_buffer if exploration_mode == 'epsilon' else shared_replay_buffer
     for step in range(max(5000, config['min_buffer'])):
         action = np.random.randint(0, config['n_actions'])
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -211,20 +201,15 @@ def main():
         total_extrinsic_reward = 0
         losses = []
         done = False
-        if exploration_mode == 'temperature':
-            # Anneal temperature
-            temperature = max(temp_min, temp_init * (temp_decay ** episode))
-            # Anneal PER beta linearly with episode (same schedule as temperature)
-            per_beta = min(per_beta_final, per_beta_init + (per_beta_final - per_beta_init) * (episode / max_episodes))
-            agent.anneal_per_beta(per_beta)
+        if exploration_mode == 'epsilon':
             for step in range(config['max_steps']):
-                action = agent.select_action(state_stack, mode='softmax', temperature=temperature, epsilon=config['epsilon'])
+                # Epsilon annealing
+                epsilon = max(epsilon_final, epsilon_start - (epsilon_start - epsilon_final) * min(1.0, total_steps / epsilon_decay_steps))
+                action = agent.select_action(state_stack, mode='epsilon', epsilon=epsilon)
                 next_obs, extrinsic_reward, terminated, truncated, info = env.step(action)
                 next_state_stack = np.roll(state_stack, shift=-1, axis=0)
                 next_state_stack[-1] = next_obs
-                # Only extrinsic reward
                 agent.replay_buffer.push(state_stack, action, extrinsic_reward, 0.0, next_state_stack, terminated or truncated)
-                # Optimize agent
                 for _ in range(5):
                     loss = agent.optimize_model(mode='exploitation')
                     if loss is not None:
@@ -245,20 +230,17 @@ def main():
             exploitation_rewards.append(total_extrinsic_reward)
             running_avg = np.mean(exploration_rewards[-min(100, len(exploration_rewards)):])
             running_avg_rewards.append(running_avg)
-            
             pbar.set_postfix({
                 'explore_r': total_combined_reward,
                 'exploit_r': total_extrinsic_reward,
-                'temp': f"{temperature:.3f}",
+                'epsilon': f"{epsilon:.3f}",
                 'loss': f"{avg_loss:.4f}"
             })
-
             if episode > 0 and episode % 10 == 0:
                 last_10_explore = exploration_rewards[-10:]
                 last_10_exploit = exploitation_rewards[-10:]
                 print(f"[Stats] Episodes {episode-9}-{episode} | Explore Avg: {np.mean(last_10_explore):.2f} | Exploit Avg: {np.mean(last_10_exploit):.2f} | {policy_str}")
-                print(f"\n--- PER Diagnostics at Episode {episode} ---")
-                per_stats = agent.diagnostic_sampling_comparison()
+                
                 
                 
         else:
@@ -332,40 +314,25 @@ def main():
             if skill_counts[skill_level] >= config['episodes_per_skill']:
                 print(f"Skill level {skill_level} ({skill_thresholds[skill_level]}+) complete.")
                 checkpoint_path = os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth')
-                if exploration_mode == 'temperature':
-                    torch.save(agent.policy_net.state_dict(), checkpoint_path)
-                    param_count = sum(p.numel() for p in agent.policy_net.parameters())
-                    param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-                else:
-                    torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
-                    param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
-                    param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
+                torch.save(agent.policy_net.state_dict(), checkpoint_path)
+                param_count = sum(p.numel() for p in agent.policy_net.parameters())
+                param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
                 print(f"Saved model to {checkpoint_path}")
                 skill_level += 1
         if episode % config['save_freq'] == 0:
             checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
-            if exploration_mode == 'temperature':
-                torch.save(agent.policy_net.state_dict(), checkpoint_path)
-                param_count = sum(p.numel() for p in agent.policy_net.parameters())
-                param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-            else:
-                torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
-                param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
-                param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
+            torch.save(agent.policy_net.state_dict(), checkpoint_path)
+            param_count = sum(p.numel() for p in agent.policy_net.parameters())
+            param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
         if skill_level >= len(skill_thresholds):
             print("All skill levels collected. Training complete.")
             break
     env.close()
     eval_env.close()
     checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
-    if exploration_mode == 'temperature':
-        torch.save(agent.policy_net.state_dict(), checkpoint_path)
-        param_count = sum(p.numel() for p in agent.policy_net.parameters())
-        param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-    else:
-        torch.save(exploitation_agent.policy_net.state_dict(), checkpoint_path)
-        param_count = sum(p.numel() for p in exploitation_agent.policy_net.parameters())
-        param_sum = sum(p.sum().item() for p in exploitation_agent.policy_net.parameters())
+    torch.save(agent.policy_net.state_dict(), checkpoint_path)
+    param_count = sum(p.numel() for p in agent.policy_net.parameters())
+    param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
     print(f"\nSaved final model to {checkpoint_path}")
     print(f"Parameter count: {param_count:,}")
     print(f"Parameter sum: {param_sum:.2f}")
