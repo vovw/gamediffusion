@@ -186,35 +186,41 @@ class PrioritizedReplayBuffer:
         return len(self.tree)
 
 class DQNCNN(nn.Module):
-    """CNN architecture for DQN, based on the original DQN paper.
-    
-    Architecture:
-    1. Input: (batch_size, 8, 84, 84) - 8 stacked frames
-    2. Conv layers process spatial features
-    3. FC layers compute Q-values for each action
-    """
+    """Improved CNN architecture with batch normalization and more capacity."""
     def __init__(self, input_shape, n_actions):
         super().__init__()
         c, h, w = input_shape
+        
+        # More filters and batch normalization
         self.conv = nn.Sequential(
             nn.Conv2d(c, 32, kernel_size=8, stride=4),
+            nn.BatchNorm2d(32),  # Stabilize training
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
         )
-        # Compute conv output size
+        
+        # Calculate conv output size
         def conv2d_size_out(size, kernel_size, stride):
             return (size - kernel_size) // stride + 1
         convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(w, 8, 4), 4, 2), 3, 1)
         convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(h, 8, 4), 4, 2), 3, 1)
         linear_input_size = convw * convh * 64
+        
+        # Wider fully connected layers
         self.fc = nn.Sequential(
             nn.Linear(linear_input_size, 512),
             nn.ReLU(),
-            nn.Linear(512, n_actions)
+            nn.Linear(512, 256),  # Additional layer for more capacity
+            nn.ReLU(),
+            nn.Linear(256, n_actions)
         )
+        
+        # Apply balanced initialization
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -496,3 +502,17 @@ class DQNAgent:
             logits = q_values / max(temperature, 1e-6)
             probs = torch.softmax(logits, dim=1).cpu().numpy().flatten()
         return probs
+
+    def get_q_values(self, state):
+        """
+        Return Q-values for all actions given a state.
+        Args:
+            state: Current state (np.ndarray)
+        Returns:
+            q_values: np.ndarray of shape (n_actions,)
+        """
+        state_tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
+        self.policy_net.eval()
+        with torch.no_grad():
+            q_values = self.policy_net(state_tensor).cpu().numpy().flatten()
+        return q_values

@@ -1,7 +1,7 @@
 """Record gameplay videos of trained and random agents playing Atari Breakout.
 
 This script records videos of both a random agent and a trained DQN agent playing Atari Breakout.
-Videos include an overlay showing frame number, action taken, current score, and softmax action probabilities.
+Videos include an overlay showing frame number, action taken, current score, and Q-values.
 
 Usage:
     # Record using latest checkpoint (default)
@@ -40,7 +40,7 @@ Output:
     
 Video Features:
     - Frame number, action taken, and score in the first overlay row
-    - Softmax probabilities for all 4 actions in the second overlay row (for DQN agent)
+    - Q-values for all 4 actions in the second overlay row (for DQN agent)
 """
 
 import os
@@ -56,8 +56,8 @@ import time
 import shutil
 import tempfile
 
-def add_text_overlay(frame, frame_num, action, cumulative_reward, softmax_probs=None):
-    """Add text overlay to frame with game information and (optionally) softmax probabilities."""
+def add_text_overlay(frame, frame_num, action, cumulative_reward, q_values=None):
+    """Add text overlay to frame with game information and (optionally) Q-values."""
     # Convert to RGB if grayscale
     if len(frame.shape) == 2:
         frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
@@ -66,8 +66,8 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward, softmax_probs=
     height, width = frame.shape[:2]
     text_height = 20
     extra_height = text_height
-    if softmax_probs is not None:
-        extra_height += 20  # Add space for softmax row
+    if q_values is not None:
+        extra_height += 20  # Add space for Q-values row
     frame_with_text = np.zeros((height + extra_height, width, 3), dtype=np.uint8)
     frame_with_text[extra_height:, :, :] = frame
     
@@ -79,10 +79,10 @@ def add_text_overlay(frame, frame_num, action, cumulative_reward, softmax_probs=
     text = f"{frame_num} | {action_names[action]} | {cumulative_reward:.1f}"
     cv2.putText(frame_with_text, text, (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     
-    # Add softmax probabilities if provided
-    if softmax_probs is not None:
-        probs_str = ' '.join([f"{p:.2f}" for p in softmax_probs])
-        cv2.putText(frame_with_text, f"P: {probs_str}", (5, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 255, 180), 1)
+    # Add Q-values if provided
+    if q_values is not None:
+        q_str = ' '.join([f"{q:.2f}" for q in q_values])
+        cv2.putText(frame_with_text, f"{q_str}", (5, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 255, 180), 1)
     
     return frame_with_text
 
@@ -126,21 +126,21 @@ def record_episode(env, agent, video_writer, temperature=1.0, frame_size=None, d
             raw_frame = np.zeros((210, 160, 3), dtype=np.uint8)
         
         # Get action from agent
-        softmax_probs = None
+        q_values = None
         if hasattr(agent, 'select_action'):
             if agent.__class__.__name__ == 'DQNAgent':
-                # Use 'greedy' mode by default, 'softmax' only if temperature is not None and not inf
-                mode = 'softmax' if (temperature is not None and not np.isinf(temperature)) else 'greedy'
-                if mode == 'softmax':
-                    softmax_probs = agent.get_action_softmax_probs(state_stack, temperature=temperature)
-                action = agent.select_action(state_stack, mode=mode, temperature=temperature)
+                q_values = agent.get_q_values(state_stack)
+                if temperature is None:
+                    action = agent.select_action(state_stack, mode='greedy')
+                else:
+                    action = agent.select_action(state_stack, mode='softmax', temperature=temperature)
             else:
                 action = agent.select_action(temperature=temperature)
         else:
             action = agent.select_action()
         
         # Add overlay
-        frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward, softmax_probs=softmax_probs)
+        frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward, q_values=q_values)
         
         # Check frame before writing
         if frame_with_overlay is not None:
@@ -180,7 +180,7 @@ def record_episode(env, agent, video_writer, temperature=1.0, frame_size=None, d
                 raw_frame = None
                 
             if raw_frame is not None and raw_frame.size > 0:
-                frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward, softmax_probs=softmax_probs)
+                frame_with_overlay = add_text_overlay(raw_frame, frame_num, action, cumulative_reward, q_values=q_values)
                 
                 # Check frame dimensions before writing
                 if frame_size is not None and hasattr(video_writer, 'write'):
@@ -500,7 +500,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='videos', help='Directory to save videos')
     parser.add_argument('--skill_level', type=int, choices=[0,1,2,3], help='Skill level checkpoint to use (0-3). If not specified, uses latest checkpoint.')
     parser.add_argument('--no_sync', action='store_true', help='Use a temporary directory to avoid iCloud sync issues')
-    parser.add_argument('--temperature', type=float, default=1.0, help='Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)')
+    parser.add_argument('--temperature', type=float, default=None, help='Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging for troubleshooting video recording issues')
     
     args = parser.parse_args()

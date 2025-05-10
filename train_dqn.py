@@ -86,7 +86,8 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
                 'step': step,
                 'q_values': ','.join(f'{q:.4f}' for q in q_values),
                 'probabilities': ','.join(f'{p:.4f}' for p in probs),
-                'action_selected': action
+                'action_selected': action,
+                'reward': reward
             })
             next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
@@ -102,7 +103,7 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
         log_id = time.strftime('%Y%m%d_%H%M%S')
     csv_path = os.path.join('eval_logs', f'eval_log_{log_id}.csv')
     with open(csv_path, 'w', newline='') as csvfile:
-        fieldnames = ['episode', 'step', 'q_values', 'probabilities', 'action_selected']
+        fieldnames = ['episode', 'step', 'q_values', 'probabilities', 'action_selected', 'reward']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for row in log_rows:
