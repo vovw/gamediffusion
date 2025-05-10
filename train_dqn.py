@@ -12,6 +12,7 @@ from rnd import RandomNetworkDistillation
 import csv
 import time
 import wandb
+from collections import deque
 
 # Config
 config = {
@@ -82,7 +83,10 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False
                     action = np.random.randint(0, config['n_actions'])
                 else:
                     action = int(np.argmax(q_values))
-            probs = np.exp(q_values) / np.sum(np.exp(q_values))
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            q_values_stable = q_values - np.max(q_values)
+            exp_q = np.exp(q_values_stable)
+            probs = exp_q / np.sum(exp_q)
             log_rows.append({
                 'episode': ep,
                 'step': step,
@@ -92,7 +96,6 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False
                 'reward': reward
             })
             all_q_values.append(q_values)
-            next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
             total_reward += reward
@@ -171,6 +174,8 @@ def main():
     skill_counts = [0] * len(skill_thresholds)
     pbar = trange(config['max_episodes'], desc='Training')
 
+    epsilon = max(epsilon_final, epsilon_start - (epsilon_start - epsilon_final) * min(1.0, total_steps / epsilon_decay_steps))
+
     # Fill replay buffer with random actions first
     print("Pre-filling replay buffer with random experiences...")
     env = AtariBreakoutEnv()
@@ -196,35 +201,21 @@ def main():
 
     eval_env = AtariBreakoutEnv()
 
-    td_errors = []
+    window_size_for_logs = 30
+    running_losses = deque(maxlen=window_size_for_logs)
+    running_td_errors = deque(maxlen=window_size_for_logs)
+    running_rewards = deque(maxlen=window_size_for_logs)
+    log_into_wandb=False
     for episode in pbar:
+        losses = []
+        td_errors = []
         # Periodic evaluation
         if episode % 10 == 0:
             log_id = f"ep{episode}"
             eval_reward, q_value_dist = evaluate_agent(agent, eval_env, n_episodes=5, log_id=log_id, return_q_values=True)
             policy_str = f"Policy eval: {eval_reward:.1f}"
-            # Log to wandb
-            try:
-                wandb.log({
-                    'eval/episode': episode,
-                    'eval/reward': eval_reward,
-                    'eval/q_value_mean': np.mean(q_value_dist),
-                    'eval/q_value_std': np.std(q_value_dist),
-                    'eval/q_value_min': np.min(q_value_dist),
-                    'eval/q_value_max': np.max(q_value_dist),
-                    'eval/q_value_hist': wandb.Histogram(q_value_dist),
-                    'train/explore_r': exploration_rewards[-1] if exploration_rewards else 0,
-                    'train/exploit_r': exploitation_rewards[-1] if exploitation_rewards else 0,
-                    'train/running_avg_reward': running_avg_rewards[-1] if running_avg_rewards else 0,
-                    'train/loss': np.mean(losses) if losses else 0,
-                    'train/td_error': np.mean(td_errors) if td_errors else 0,
-                    'train/epsilon': epsilon if exploration_mode == 'epsilon' else None,
-                    'train/alpha': alpha if exploration_mode != 'epsilon' else None,
-                    'train/episode': episode
-                }, step=episode)
-            except Exception as e:
-                print(f"[wandb] Logging failed: {e}")
-            td_errors.clear()
+            log_into_wandb=True
+            
         else:
             policy_str = ""
 
@@ -233,7 +224,6 @@ def main():
         frames, actions, extrinsic_rewards, intrinsic_rewards = [obs], [], [], []
         total_combined_reward = 0
         total_extrinsic_reward = 0
-        losses = []
         done = False
         if exploration_mode == 'epsilon':
             for step in range(config['max_steps']):
@@ -264,13 +254,18 @@ def main():
             avg_loss = np.mean(losses) if losses else 0.0
             exploration_rewards.append(total_combined_reward)
             exploitation_rewards.append(total_extrinsic_reward)
-            running_avg = np.mean(exploration_rewards[-min(100, len(exploration_rewards)):])
+            running_avg = np.mean(exploration_rewards[-min(window_size_for_logs, len(exploration_rewards)):])
             running_avg_rewards.append(running_avg)
+            running_losses.append(avg_loss)
+            running_rewards.append(total_combined_reward)
+            avg_td_error = np.mean(td_errors) if td_errors else 0.0
+            running_td_errors.append(avg_td_error)
             pbar.set_postfix({
                 'explore_r': total_combined_reward,
                 'exploit_r': total_extrinsic_reward,
                 'epsilon': f"{epsilon:.3f}",
-                'loss': f"{avg_loss:.4f}"
+                'loss': f"{avg_loss:.3f}",
+                'td_error': f"{avg_td_error:.3f}"
             })
             if episode > 0 and episode % 10 == 0:
                 last_10_explore = exploration_rewards[-10:]
@@ -319,20 +314,19 @@ def main():
             exploration_rewards.append(total_combined_reward)
             exploitation_rewards.append(total_extrinsic_reward)
             intrinsic_rewards_log.append(np.sum(intrinsic_rewards))
-            running_avg = np.mean(exploration_rewards[-min(100, len(exploration_rewards)):])
+            running_avg = np.mean(exploration_rewards[-min(window_size_for_logs, len(exploration_rewards)):])
             running_avg_rewards.append(running_avg)
+            running_rewards.append(total_combined_reward)
+            running_losses.append(avg_loss)
+            avg_td_error = np.mean(td_errors) if td_errors else 0.0
+            running_td_errors.append(avg_td_error)
             alpha = max(min_alpha, alpha * alpha_decay)
-            if episode % 10 == 0:
-                log_id = f"ep{episode}"
-                eval_reward = evaluate_agent(exploitation_agent, eval_env, n_episodes=5, log_id=log_id)
-                policy_str = f"Policy eval: {eval_reward:.1f}"
-            else:
-                policy_str = ""
             pbar.set_postfix({
                 'explore_r': total_combined_reward,
                 'exploit_r': total_extrinsic_reward,
                 'alpha': f"{alpha:.3f}",
-                'loss': f"{avg_loss:.4f}"
+                'loss': f"{avg_loss:.3f}",
+                'td_error': f"{avg_td_error:.3f}"
             })
             if episode > 0 and episode % 10 == 0:
                 last_10_explore = exploration_rewards[-10:]
@@ -342,6 +336,40 @@ def main():
                 print(f"RND Stats: {rnd.get_stats()}")
                 intrinsic_ratio = np.mean(last_10_intrinsic) / (np.mean(np.abs(last_10_exploit)) + 1e-8)
                 print(f"Intrinsic/Extrinsic ratio: {intrinsic_ratio:.2f}")
+        
+        if log_into_wandb:
+            # Log to wandb
+            try:
+                # Get weight and grad norms
+                weight_norms = agent.get_weight_norms()
+                grad_norms = agent.get_grad_norms()
+                wandb.log({
+                    'eval/episode': episode,
+                    'eval/reward': eval_reward,
+                    'eval/q_value_mean': np.mean(q_value_dist),
+                    'eval/q_value_std': np.std(q_value_dist),
+                    'eval/q_value_min': np.min(q_value_dist),
+                    'eval/q_value_max': np.max(q_value_dist),
+                    'eval/q_value_hist': wandb.Histogram(q_value_dist),
+                    'train/reward_current': running_rewards[-1] if running_rewards else 0,
+                    'train/loss_current': running_losses[-1] if running_losses else 0,
+                    'train/td_error_current': running_td_errors[-1] if running_td_errors else 0,
+                    'train/running_reward': np.mean(running_rewards) if running_rewards else 0,
+                    'train/running_loss': np.mean(running_losses) if running_losses else 0,
+                    'train/running_td_error': np.mean(running_td_errors) if running_td_errors else 0,
+                    'train/epsilon': epsilon if exploration_mode == 'epsilon' else None,
+                    'train/alpha': alpha if exploration_mode != 'epsilon' else None,
+                    'train/episode': episode,
+                    'policy/weight_norm': weight_norms['policy_weight_norm'],
+                    'policy/grad_norm': grad_norms['policy_grad_norm'],
+                    'target/weight_norm': weight_norms['target_weight_norm'],
+                    'target/grad_norm': grad_norms['target_grad_norm'],
+                }, step=episode)
+            except Exception as e:
+                print(f"[wandb] Logging failed: {e}")
+            
+            log_into_wandb=False
+        
         # Save episode data if in skill collection phase
         if (not args.no_save and
             skill_level < len(skill_thresholds) and

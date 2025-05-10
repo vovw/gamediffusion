@@ -186,41 +186,35 @@ class PrioritizedReplayBuffer:
         return len(self.tree)
 
 class DQNCNN(nn.Module):
-    """Improved CNN architecture with batch normalization and more capacity."""
+    """CNN architecture for DQN, based on the original DQN paper.
+    
+    Architecture:
+    1. Input: (batch_size, 8, 84, 84) - 8 stacked frames
+    2. Conv layers process spatial features
+    3. FC layers compute Q-values for each action
+    """
     def __init__(self, input_shape, n_actions):
         super().__init__()
         c, h, w = input_shape
-        
-        # More filters and batch normalization
         self.conv = nn.Sequential(
             nn.Conv2d(c, 32, kernel_size=8, stride=4),
-            nn.BatchNorm2d(32),  # Stabilize training
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.BatchNorm2d(64),
             nn.ReLU(),
         )
-        
-        # Calculate conv output size
+        # Compute conv output size
         def conv2d_size_out(size, kernel_size, stride):
             return (size - kernel_size) // stride + 1
         convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(w, 8, 4), 4, 2), 3, 1)
         convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(h, 8, 4), 4, 2), 3, 1)
         linear_input_size = convw * convh * 64
-        
-        # Wider fully connected layers
         self.fc = nn.Sequential(
             nn.Linear(linear_input_size, 512),
             nn.ReLU(),
-            nn.Linear(512, 256),  # Additional layer for more capacity
-            nn.ReLU(),
-            nn.Linear(256, n_actions)
+            nn.Linear(512, n_actions)
         )
-        
-        # Apply balanced initialization
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -515,3 +509,26 @@ class DQNAgent:
         with torch.no_grad():
             q_values = self.policy_net(state_tensor).cpu().numpy().flatten()
         return q_values
+
+    def get_weight_norms(self):
+        """Return L2 norm of weights for policy and target networks as a dict."""
+        policy_weight_norm = float(torch.norm(torch.stack([p.detach().float().norm(2) for p in self.policy_net.parameters()]), 2).item())
+        target_weight_norm = float(torch.norm(torch.stack([p.detach().float().norm(2) for p in self.target_net.parameters()]), 2).item())
+        return {
+            'policy_weight_norm': policy_weight_norm,
+            'target_weight_norm': target_weight_norm
+        }
+
+    def get_grad_norms(self):
+        """Return L2 norm of gradients for policy and target networks as a dict. If gradients are None, returns 0."""
+        def grad_norm(model):
+            grads = [p.grad.detach().float().norm(2) for p in model.parameters() if p.grad is not None]
+            if len(grads) == 0:
+                return 0.0
+            return float(torch.norm(torch.stack(grads), 2).item())
+        policy_grad_norm = grad_norm(self.policy_net)
+        target_grad_norm = grad_norm(self.target_net)
+        return {
+            'policy_grad_norm': policy_grad_norm,
+            'target_grad_norm': target_grad_norm
+        }
