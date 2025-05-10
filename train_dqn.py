@@ -11,6 +11,7 @@ import argparse
 from rnd import RandomNetworkDistillation
 import csv
 import time
+import wandb
 
 # Config
 config = {
@@ -19,7 +20,7 @@ config = {
     'state_shape': (8, 84, 84),
     'max_episodes': 10000,
     'max_steps': 1000,
-    'target_update_freq': 1000,
+    'target_update_freq': 200, #since i'm doing 5 update steps per environment step, this means 200*5=1000 steps between target network updates
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -61,10 +62,11 @@ def save_episode_data(frames, actions, rewards, skill_level, episode_idx, config
         json.dump(all_actions, f, indent=2)
 
 
-def evaluate_agent(agent, env, n_episodes=10, log_id=None):
-    """Evaluate agent and return average reward. Logs Q-values, softmax probabilities, and actions to CSV."""
+def evaluate_agent(agent, env, n_episodes=10, log_id=None, return_q_values=False):
+    """Evaluate agent and return average reward. Optionally return all Q-values for wandb logging."""
     rewards = []
     log_rows = []
+    all_q_values = []
     for ep in range(n_episodes):
         obs, info = env.reset()
         state_stack = np.stack([obs] * 8, axis=0)
@@ -89,6 +91,7 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
                 'action_selected': action,
                 'reward': reward
             })
+            all_q_values.append(q_values)
             next_obs, reward, terminated, truncated, info = env.step(action)
             state_stack = np.roll(state_stack, shift=-1, axis=0)
             state_stack[-1] = next_obs
@@ -108,6 +111,8 @@ def evaluate_agent(agent, env, n_episodes=10, log_id=None):
         writer.writeheader()
         for row in log_rows:
             writer.writerow(row)
+    if return_q_values:
+        return np.mean(rewards), np.concatenate(all_q_values)
     return np.mean(rewards)
 
 
@@ -129,6 +134,9 @@ def main():
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['data_dir'], exist_ok=True)
     os.makedirs(config['actions_dir'], exist_ok=True)
+
+    # --- wandb setup ---
+    wandb.init(project="atari-dqn", config=config, name=f"DQN_{config['env_name']}")
 
     # --- Exploration Mode Setup ---
     exploration_mode = args.exploration_mode
@@ -188,12 +196,35 @@ def main():
 
     eval_env = AtariBreakoutEnv()
 
+    td_errors = []
     for episode in pbar:
         # Periodic evaluation
         if episode % 10 == 0:
             log_id = f"ep{episode}"
-            eval_reward = evaluate_agent(agent, eval_env, n_episodes=5, log_id=log_id)
+            eval_reward, q_value_dist = evaluate_agent(agent, eval_env, n_episodes=5, log_id=log_id, return_q_values=True)
             policy_str = f"Policy eval: {eval_reward:.1f}"
+            # Log to wandb
+            try:
+                wandb.log({
+                    'eval/episode': episode,
+                    'eval/reward': eval_reward,
+                    'eval/q_value_mean': np.mean(q_value_dist),
+                    'eval/q_value_std': np.std(q_value_dist),
+                    'eval/q_value_min': np.min(q_value_dist),
+                    'eval/q_value_max': np.max(q_value_dist),
+                    'eval/q_value_hist': wandb.Histogram(q_value_dist),
+                    'train/explore_r': exploration_rewards[-1] if exploration_rewards else 0,
+                    'train/exploit_r': exploitation_rewards[-1] if exploitation_rewards else 0,
+                    'train/running_avg_reward': running_avg_rewards[-1] if running_avg_rewards else 0,
+                    'train/loss': np.mean(losses) if losses else 0,
+                    'train/td_error': np.mean(td_errors) if td_errors else 0,
+                    'train/epsilon': epsilon if exploration_mode == 'epsilon' else None,
+                    'train/alpha': alpha if exploration_mode != 'epsilon' else None,
+                    'train/episode': episode
+                }, step=episode)
+            except Exception as e:
+                print(f"[wandb] Logging failed: {e}")
+            td_errors.clear()
         else:
             policy_str = ""
 
@@ -214,9 +245,11 @@ def main():
                 next_state_stack[-1] = next_obs
                 agent.replay_buffer.push(state_stack, action, extrinsic_reward, 0.0, next_state_stack, terminated or truncated)
                 for _ in range(5):
-                    loss = agent.optimize_model(mode='exploitation')
-                    if loss is not None:
+                    result = agent.optimize_model(mode='exploitation')
+                    if result is not None:
+                        loss, td_error = result
                         losses.append(loss)
+                        td_errors.append(td_error)
                 state_stack = next_state_stack
                 frames.append(next_obs)
                 actions.append(action)
@@ -256,11 +289,13 @@ def main():
                 intrinsic_reward = float(rnd.compute_intrinsic_reward(np.expand_dims(next_state_stack, axis=0)).cpu().numpy()[0])
                 shared_replay_buffer.push(state_stack, action, extrinsic_reward, intrinsic_reward, next_state_stack, terminated or truncated)
                 for _ in range(5):
-                    loss = exploration_agent.optimize_model(mode='exploration', alpha=alpha)
-                    if loss is not None:
+                    result = exploration_agent.optimize_model(mode='exploration', alpha=alpha)
+                    if result is not None:
+                        loss, td_error = result
                         losses.append(loss)
+                        td_errors.append(td_error)
                 for _ in range(5):
-                    loss = exploitation_agent.optimize_model(mode='exploitation')
+                    _ = exploitation_agent.optimize_model(mode='exploitation')
                 if np.random.rand() < 0.2:
                     if len(shared_replay_buffer) >= 128:
                         batch = shared_replay_buffer.sample(128, mode='exploration', alpha=alpha)

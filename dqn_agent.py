@@ -331,7 +331,10 @@ class DQNAgent:
         return action
 
     def optimize_model(self, mode: str = 'exploration', alpha: float = 0.5):
-        """Update policy network using double DQN algorithm. Mode controls reward type."""
+        """Update policy network using double DQN algorithm. Mode controls reward type.
+        Returns:
+            tuple: (loss.item(), mean_td) if update performed, else None
+        """
         if len(self.replay_buffer) < self.batch_size:
             return None
         # PER logic
@@ -359,11 +362,8 @@ class DQNAgent:
                 next_q_values = self.target_net(next_states).gather(1, next_actions)
                 target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
             td_errors = q_values - target_q
-            
             max_td = td_errors.abs().max().item()
             mean_td = td_errors.abs().mean().item()
-            #print(f"[DEBUG] TD Errors - Max: {max_td:.6f}, Mean: {mean_td:.6f}")
-
             if weights is not None:
                 loss = (weights * td_errors.pow(2)).mean()
             else:
@@ -383,9 +383,8 @@ class DQNAgent:
             scaling_factor = 3
             scaled_td_errors = td_errors * scaling_factor  # Scale by a factor of 10
             new_priorities = (scaled_td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
-            #print(f"[DEBUG] New priorities - Max: {new_priorities.max():.6f}, Mean: {new_priorities.mean():.6f}")
             self.replay_buffer.update_priorities(idxs, new_priorities)
-        return loss.item()
+        return loss.item(), mean_td
 
     def update_target_network(self):
         """Copy policy network weights to target network.
