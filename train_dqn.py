@@ -21,7 +21,7 @@ config = {
     'state_shape': (8, 84, 84),
     'max_episodes': 10000,
     'max_steps': 1000,
-    'target_update_freq': 200, #since i'm doing 5 update steps per environment step, this means 200*5=1000 steps between target network updates
+    'target_update_freq': 10000, #since i'm doing 5 update steps per environment step, this means 200*5=1000 steps between target network updates
     'checkpoint_dir': 'checkpoints',
     'data_dir': 'data/raw_gameplay',
     'actions_dir': 'data/actions',
@@ -234,7 +234,7 @@ def main():
                 next_state_stack = np.roll(state_stack, shift=-1, axis=0)
                 next_state_stack[-1] = next_obs
                 agent.replay_buffer.push(state_stack, action, extrinsic_reward, 0.0, next_state_stack, terminated or truncated)
-                for _ in range(5):
+                for _ in range(1):
                     result = agent.optimize_model(mode='exploitation')
                     if result is not None:
                         loss, td_error = result
