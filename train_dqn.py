@@ -28,8 +28,6 @@ config = {
     'save_freq': 10,
     'min_buffer': 100000,
     'seed': 42,
-    'skill_thresholds': [0, 50, 150, 250],
-    'episodes_per_skill': 50,
     'epsilon': 0.1,  # Epsilon for epsilon-greedy exploration
 }
 
@@ -168,10 +166,6 @@ def main():
     exploitation_rewards = []
     intrinsic_rewards_log = []
     running_avg_rewards = []
-    skill_level = 0
-    skill_episodes = 0
-    skill_thresholds = config['skill_thresholds']
-    skill_counts = [0] * len(skill_thresholds)
     pbar = trange(config['max_episodes'], desc='Training')
 
     epsilon = max(epsilon_final, epsilon_start - (epsilon_start - epsilon_final) * min(1.0, total_steps / epsilon_decay_steps))
@@ -191,6 +185,7 @@ def main():
         #random_priority = random.uniform(0.1, 1.0)
         # For prefill, set intrinsic reward to 0
         #replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated, random_priority)
+        # state, action, extrinsic_reward, intrinsic_reward, next_state, done
         replay_buffer.push(state_stack, action, reward, 0.0, next_state_stack, terminated or truncated)
         state_stack = next_state_stack
         if terminated or truncated:
@@ -249,6 +244,7 @@ def main():
                 total_steps += 1
                 if total_steps % config['target_update_freq'] == 0:
                     agent.update_target_network()
+                    print(f"Target network updated at step {total_steps}")
                 if terminated or truncated:
                     break
             avg_loss = np.mean(losses) if losses else 0.0
@@ -344,6 +340,7 @@ def main():
                 weight_norms = agent.get_weight_norms()
                 grad_norms = agent.get_grad_norms()
                 wandb.log({
+                    'eval/total_steps': total_steps,
                     'eval/episode': episode,
                     'eval/reward': eval_reward,
                     'eval/q_value_mean': np.mean(q_value_dist),
@@ -364,36 +361,20 @@ def main():
                     'policy/grad_norm': grad_norms['policy_grad_norm'],
                     'target/weight_norm': weight_norms['target_weight_norm'],
                     'target/grad_norm': grad_norms['target_grad_norm'],
+                    'policy/max_weight': weight_norms['policy_max_weight'],
+                    'policy/min_weight': weight_norms['policy_min_weight'],
                 }, step=episode)
             except Exception as e:
                 print(f"[wandb] Logging failed: {e}")
             
             log_into_wandb=False
         
-        # Save episode data if in skill collection phase
-        if (not args.no_save and
-            skill_level < len(skill_thresholds) and
-            running_avg >= skill_thresholds[skill_level]):
-            if skill_counts[skill_level] < config['episodes_per_skill']:
-                save_episode_data(frames, actions, extrinsic_rewards, skill_level, skill_counts[skill_level]+1, config)
-                skill_counts[skill_level] += 1
-            if skill_counts[skill_level] >= config['episodes_per_skill']:
-                print(f"Skill level {skill_level} ({skill_thresholds[skill_level]}+) complete.")
-                checkpoint_path = os.path.join(config['checkpoint_dir'], f'dqn_skill_{skill_level}.pth')
-                torch.save(agent.policy_net.state_dict(), checkpoint_path)
-                param_count = sum(p.numel() for p in agent.policy_net.parameters())
-                param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-                print(f"Saved model to {checkpoint_path}")
-                skill_level += 1
         if episode % config['save_freq'] == 0:
             checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
             torch.save(agent.policy_net.state_dict(), checkpoint_path)
             param_count = sum(p.numel() for p in agent.policy_net.parameters())
             param_sum = sum(p.sum().item() for p in agent.policy_net.parameters())
-        if skill_level >= len(skill_thresholds):
-            print("All skill levels collected. Training complete.")
-            break
-    env.close()
+
     eval_env.close()
     checkpoint_path = os.path.join(config['checkpoint_dir'], 'dqn_latest.pth')
     torch.save(agent.policy_net.state_dict(), checkpoint_path)

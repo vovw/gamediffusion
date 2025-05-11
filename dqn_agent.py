@@ -275,7 +275,7 @@ class DQNAgent:
                 self.replay_buffer = ReplayBuffer(capacity=1000000)
         self.gamma = 0.99  # Discount factor
         self.batch_size = 32
-        self.learning_rate = 5 * 5e-5
+        self.learning_rate = 2.5e-4
         # Device selection
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -300,9 +300,6 @@ class DQNAgent:
             temperature: Temperature for softmax exploration
             epsilon: Probability of random action (for training only)
         """
-        # Epsilon-greedy component (for training only)
-        if epsilon > 0 and random.random() < epsilon:
-            return random.randint(0, self.n_actions - 1)
         
         # Normal policy-based selection (without normalization)
         state_tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
@@ -314,6 +311,11 @@ class DQNAgent:
                 logits = q_values / max(temperature, 1e-6)
                 probs = torch.softmax(logits, dim=1)
                 action = int(torch.multinomial(probs, num_samples=1).item())
+            elif mode == 'epsilon':
+                if np.random.rand() < epsilon:
+                    action = np.random.randint(0, self.n_actions)
+                else:
+                    action = int(torch.argmax(q_values, dim=1).item())  
             elif mode == 'greedy':
                 # Greedy with 5% random action
                 if np.random.rand() < 0.05:
@@ -324,60 +326,73 @@ class DQNAgent:
                 action = int(torch.argmax(q_values, dim=1).item())
         return action
 
-    def optimize_model(self, mode: str = 'exploration', alpha: float = 0.5):
-        """Update policy network using double DQN algorithm. Mode controls reward type.
-        Returns:
-            tuple: (loss.item(), mean_td) if update performed, else None
-        """
+    def optimize_model(self, mode: str = 'exploitation', alpha: float = 0.5):
+        """Update policy network using double DQN algorithm with NaN protection."""
         if len(self.replay_buffer) < self.batch_size:
             return None
-        # PER logic
-        if self.prioritized and isinstance(self.replay_buffer, PrioritizedReplayBuffer):
-            batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
+            
+        # Sample from replay buffer
+        batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
+        
+        # Unpack batch (simplifying PER logic for clarity)
+        if self.prioritized:
             states, actions, rewards, next_states, dones, weights, idxs = batch
-            weights = torch.tensor(weights, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
+            weights = torch.tensor(weights, dtype=torch.float32, device=self.device).unsqueeze(1)
         else:
-            batch = self.replay_buffer.sample(self.batch_size, mode=mode, alpha=alpha)
             states, actions, rewards, next_states, dones = batch
             weights = None
             idxs = None
+        
         # Convert to tensors
-        states = torch.from_numpy(np.stack(states)).to(self.device).float() / 255.0  # (B, 8, 84, 84)
-        actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)  # (B, 1)
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
-        next_states = torch.from_numpy(np.stack(next_states)).to(self.device).float() / 255.0
-        dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)  # (B, 1)
+        states = torch.from_numpy(np.stack(states)).to(self.device).float()
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
+        next_states = torch.from_numpy(np.stack(next_states)).to(self.device).float()
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+        
+        # Switch to training mode
         self.policy_net.train()
-        scaler = torch.cuda.amp.GradScaler() if self.device.type == 'cuda' else None
-        with torch.cuda.amp.autocast(enabled=(scaler is not None)):
-            q_values = self.policy_net(states).gather(1, actions)  # (B, 1)
-            with torch.no_grad():
-                next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]
-                next_q_values = self.target_net(next_states).gather(1, next_actions)
-                target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
-            td_errors = q_values - target_q
-            max_td = td_errors.abs().max().item()
-            mean_td = td_errors.abs().mean().item()
-            if weights is not None:
-                loss = (weights * td_errors.pow(2)).mean()
-            else:
-                loss = nn.HuberLoss()(q_values, target_q)
+        
+        # Calculate current Q-values
+        q_values = self.policy_net(states).gather(1, actions)
+        
+        # Calculate target Q-values (Double DQN)
+        with torch.no_grad():
+            # Select actions using policy net
+            next_actions = self.policy_net(next_states).max(1, keepdim=True)[1]
+            # Evaluate actions using target net
+            next_q_values = self.target_net(next_states).gather(1, next_actions)
+            # Calculate targets
+            target_q = rewards + self.gamma * next_q_values * (1.0 - dones)
+        
+        # Calculate TD errors and loss
+        td_errors = q_values - target_q
+        mean_td = td_errors.abs().mean().item()
+        
+        # Use Huber loss for stability
+        loss = nn.HuberLoss()(q_values, target_q)
+        
+        # Backpropagation
         self.optimizer.zero_grad()
-        if scaler is not None:
-            scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
-            scaler.step(self.optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
-            self.optimizer.step()
-        # Update priorities if using PER
-        if self.prioritized and idxs is not None:
-            scaling_factor = 3
-            scaled_td_errors = td_errors * scaling_factor  # Scale by a factor of 10
-            new_priorities = (scaled_td_errors.detach().abs() + self.replay_buffer.epsilon).cpu().numpy().flatten()
-            self.replay_buffer.update_priorities(idxs, new_priorities)
+        loss.backward()
+        
+        # Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        
+        # Check for NaN before updating
+        if any(torch.isnan(p.grad).any() for p in self.policy_net.parameters() if p.grad is not None):
+            print("WARNING: NaN detected in gradients! Skipping update.")
+            return None
+            
+        # Update weights
+        self.optimizer.step()
+        
+        # Check for NaN after updating
+        if any(torch.isnan(p).any() for p in self.policy_net.parameters()):
+            print("WARNING: NaN detected in weights! Restoring from target network.")
+            self.policy_net.load_state_dict(self.target_net.state_dict())
+            return None
+        
         return loss.item(), mean_td
 
     def update_target_network(self):
@@ -514,9 +529,15 @@ class DQNAgent:
         """Return L2 norm of weights for policy and target networks as a dict."""
         policy_weight_norm = float(torch.norm(torch.stack([p.detach().float().norm(2) for p in self.policy_net.parameters()]), 2).item())
         target_weight_norm = float(torch.norm(torch.stack([p.detach().float().norm(2) for p in self.target_net.parameters()]), 2).item())
+        # Add monitoring for extreme values
+        max_weight = max([p.detach().abs().max().item() for p in self.policy_net.parameters()])
+        min_weight = min([p.detach().abs().min().item() for p in self.policy_net.parameters() if p.numel() > 0])
+        
         return {
             'policy_weight_norm': policy_weight_norm,
-            'target_weight_norm': target_weight_norm
+            'target_weight_norm': target_weight_norm,
+            'policy_max_weight': max_weight,
+            'policy_min_weight': min_weight
         }
 
     def get_grad_norms(self):
