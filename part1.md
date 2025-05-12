@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project now supports two exploration strategies for DQN training in Atari Breakout:
+This project supports two exploration strategies for DQN training in Atari Breakout:
 
 ### 1. Temperature-based Exploration (Default)
 - **Action selection:** Softmax over Q-values with a temperature parameter (Boltzmann exploration).
@@ -100,38 +100,27 @@ This update improves clarity, maintainability, and flexibility for experimentati
    - Both agents are optimized in parallel during training
    - Periodically evaluate the exploitation agent for skill assessment and checkpointing
 
-4. Train the agent in stages, saving checkpoints at:
-   - Random play (untrained)
-   - Early learning (reaching ~50 points average)
-   - Intermediate skill (reaching ~150 points average)
-   - Skilled play (reaching ~250+ points average)
-
 ### Data Collection
-1. For each skill level, record:
-   - 50 complete gameplay episodes
-   - Store sequential frames as PNG images at 84x84 resolution
-   - Save corresponding actions (LEFT, RIGHT, NOTHING) in a JSON file
-   - Include reward and episode information for reference
+- For each training run, record:
+  - Complete gameplay episodes
+  - Store sequential frames as PNG images at 84x84 resolution
+  - Save corresponding actions (LEFT, RIGHT, NOTHING) in a JSON file
+  - Include reward and episode information for reference
 
-2. Organize data structure as:
+- Organize data structure as:
 data/
   raw_gameplay/
-    skill_level_0/
+    episodes/
       episode_001/
         frame_00000.png
         frame_00001.png
         ...
       episode_002/
         ...
-    skill_level_1/
-      ...
-    ...
   actions/
-    skill_level_0_actions.json
-    skill_level_1_actions.json
-    ...
+    actions.json
 
-3. Create validation splits (10% of episodes) for later evaluation
+- Create validation splits (10% of episodes) for later evaluation
 
 ### Tools and Libraries
 - PyTorch for agent implementation
@@ -141,8 +130,7 @@ data/
 - Weights & Biases (optional) for experiment tracking
 
 ### Success Criteria
-- At least 200 total episodes recorded across all skill levels
-- Highest skill level should achieve consistent scores >200 points
+- Agent achieves a score up to 20 points
 - Complete and accurate action logs corresponding to all frames
 - **Demonstrated use of RND and dual-agent setup for improved exploration and skill acquisition**
 - **Demonstrated use of Prioritized Experience Replay (PER) and temperature-based softmax exploration for improved sample efficiency and learning**
@@ -183,12 +171,12 @@ data/
   - Multiple optimization steps per environment step (10x)
   - Epsilon decay with faster schedule (200k steps)
   - Target network updates, and checkpointing
-  - Running average reward tracking for skill level determination
+  - Running average reward tracking
   - Command-line overrides for max_episodes, min_buffer, save_freq, and no_save (for flexible runs)
   - Loss logging: average loss per episode, running stats for last 10 episodes, and reward tracking
   - Option to skip saving frames/actions for dry runs (`--no_save`)
-  - Saving model checkpoints at skill milestones (random, ~50, ~150, ~250 points average)
-  - Recording gameplay data (frames, actions, rewards) for each skill level as PNGs and JSON
+  - Saving model checkpoints
+  - Recording gameplay data (frames, actions, rewards) for each episode as PNGs and JSON
   - Progress bar and improved logging with formatted metrics
 - **Test Suite**: Comprehensive pytest-based tests for environment, agents (random and DQN), replay buffer, target network sync, epsilon-greedy policy, and DQN training/optimization.
 - **ROM Installation**: Requirements and instructions updated to ensure ROMs are installed automatically.
@@ -202,17 +190,22 @@ data/
   - Generate videos of gameplay episodes for random and trained agents
   - Save videos as MP4 files at 30fps
   - Include frame number, action taken, and cumulative reward as overlay text
-  - Support for different skill level checkpoints
+  - Support for different checkpoints
 - **Reward Shaping**: Implementation in `AtariBreakoutEnv` including:
   - Living penalty (-0.001 per time step)
   - Life loss penalty (-1.0 for losing a life)
   - Tracking lives between steps to detect life loss
 
 ### Remaining tasks
-- Train DQN agent to different skill levels and save checkpoints (full run with data saving enabled)
-- Record and organize gameplay data for each skill level (as described above)
-- Create validation splits for evaluation
+- Train DQN agent for longer durations
+- Increase max steps per episode from 1000 to 10000
 - Integrate experiment tracking (e.g., with WandB)
+
+## Next Steps
+- **Train for longer durations:** Extend training to allow the agent to learn more complex strategies and improve its score.
+- **Increase max steps per episode:** Change the environment or training configuration to allow up to 10,000 steps per episode (currently 1,000), enabling the agent to play longer and potentially achieve higher scores.
+- **Target high scores:** Aim for the agent to reach and surpass a score of 200 points as training progresses.
+- **Continue experiment tracking and checkpointing:** Use tools like WandB for logging and analysis.
 
 ## Planned Improvements Status
 
