@@ -25,6 +25,10 @@ Usage:
     # Adjust action selection randomness (lower values = more deterministic)
     python record_videos.py --temperature 0.5
 
+    # BULK GENERATION (no overlays):
+    # Generate 20 videos, 30% random agent, 70% trained agent, no overlays
+    python record_videos.py --bulk --total_videos 20 --percent_random 30
+
 Arguments:
     --num_episodes: Number of episodes to record for each agent (default: 5)
     --output_dir: Directory to save videos (default: 'videos')
@@ -32,15 +36,23 @@ Arguments:
     --no_sync: Set to True to use a non-synced directory for video output (default: False)
     --temperature: Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)
     --debug: Enable debug logging for troubleshooting video recording issues (default: False)
+    
+    # Bulk generation options:
+    --bulk: Enable bulk video generation mode (no overlays)
+    --total_videos: Total number of videos to generate in bulk mode (default: 10)
+    --percent_random: Percentage of random agent videos in bulk mode (0-100, default: 50)
 
 Output:
     - Random agent videos: random_agent_episode_X.mp4
     - Trained agent videos: trained_agent_[checkpoint]_episode_X.mp4
+    - Bulk random agent videos: bulk_random_agent_X.mp4
+    - Bulk trained agent videos: bulk_trained_agent_[checkpoint]_X.mp4
     where [checkpoint] is either 'latest' or 'skill_N' depending on --skill_level
     
 Video Features:
-    - Frame number, action taken, and score in the first overlay row
-    - Q-values for all 4 actions in the second overlay row (for DQN agent)
+    - Frame number, action taken, and score in the first overlay row (standard mode)
+    - Q-values for all 4 actions in the second overlay row (for DQN agent, standard mode)
+    - No overlays in bulk mode
 """
 
 import os
@@ -494,6 +506,185 @@ def record_gameplay_videos(num_episodes=5, output_dir='videos', skill_level=None
     
     print("\nAll videos recorded successfully!")
 
+def record_bulk_videos(
+    total_videos=10,
+    output_dir='videos',
+    percent_random=50,
+    skill_level=None,
+    no_sync=False,
+    temperature=1.0,
+    debug=False,
+    frame_size=None,
+    fps=30
+):
+    """Bulk generate videos without text overlay, with a specified percentage from random agent."""
+    temp_dir = None
+    working_dir = output_dir
+    if no_sync:
+        temp_dir = tempfile.mkdtemp()
+        working_dir = temp_dir
+        print(f"Using temporary directory: {temp_dir}")
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+
+    env = AtariBreakoutEnv()
+    random_agent = RandomAgent(n_actions=4)
+    dqn_agent = DQNAgent(n_actions=4, state_shape=(8, 84, 84))
+    if skill_level is not None:
+        model_path = os.path.join('checkpoints', f'dqn_skill_{skill_level}.pth')
+        checkpoint_name = f'skill_{skill_level}'
+    else:
+        model_path = os.path.join('checkpoints', 'dqn_latest.pth')
+        checkpoint_name = 'latest'
+    if os.path.exists(model_path):
+        dqn_agent.policy_net.load_state_dict(torch.load(model_path))
+        dqn_agent.policy_net.eval()
+        print(f"Model loaded from {model_path}. Device: {next(dqn_agent.policy_net.parameters()).device}")
+    else:
+        print(f"Warning: No checkpoint found at {model_path}, using untrained model")
+
+    # Get frame size if not provided
+    if frame_size is None:
+        env.reset()
+        try:
+            test_frame = env.env.render()
+            if test_frame is not None:
+                frame_height = test_frame.shape[0]
+                frame_width = test_frame.shape[1]
+                frame_size = (frame_width, frame_height)
+            else:
+                frame_size = (160, 210)
+        except Exception as e:
+            if debug:
+                print(f"Error rendering test frame: {e}. Using default size: (160, 210)")
+            frame_size = (160, 210)
+    print(f"[Bulk] Using frame size: {frame_size}")
+
+    codecs = [
+        ('MJPG', '.avi'),
+        ('XVID', '.avi'),
+        ('mp4v', '.mp4'),
+        ('avc1', '.mp4'),
+        ('FMP4', '.mp4'),
+        ('H264', '.mp4'),
+        ('X264', '.mp4'),
+        ('WMV1', '.wmv'),
+        ('THEO', '.ogv')
+    ]
+    working_codec = None
+    for codec, ext in codecs:
+        try:
+            test_path = os.path.join(working_dir, f'test{ext}')
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            test_writer = cv2.VideoWriter(test_path, fourcc, fps, frame_size)
+            if not test_writer.isOpened():
+                continue
+            dummy_frame = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
+            test_writer.write(dummy_frame)
+            test_writer.release()
+            if os.path.exists(test_path) and os.path.getsize(test_path) > 1000:
+                working_codec = (codec, ext)
+                os.remove(test_path)
+                break
+            if os.path.exists(test_path):
+                os.remove(test_path)
+        except Exception:
+            continue
+    if working_codec is None:
+        print("Error: Could not find a working video codec. Using MJPG as fallback.")
+        working_codec = ('MJPG', '.avi')
+    fourcc = cv2.VideoWriter_fourcc(*working_codec[0])
+    file_ext = working_codec[1]
+
+    # Determine number of random and trained videos
+    num_random = int(total_videos * percent_random / 100)
+    num_trained = total_videos - num_random
+    print(f"[Bulk] Generating {num_random} random agent videos and {num_trained} trained agent videos.")
+
+    def record_episode_no_overlay(env, agent, video_writer, temperature=1.0, frame_size=None, debug=False, png_dir=None):
+        obs, info = env.reset()
+        state_stack = np.stack([obs] * 8, axis=0)
+        frame_num = 0
+        max_steps = 1000
+        while True:
+            if frame_num > max_steps:
+                break
+            try:
+                raw_frame = env.env.render()
+            except Exception:
+                raw_frame = None
+            if raw_frame is None or raw_frame.size == 0:
+                raw_frame = np.zeros((210, 160, 3), dtype=np.uint8)
+            if frame_size is not None and hasattr(video_writer, 'write'):
+                expected_width, expected_height = frame_size[0], frame_size[1]
+                actual_height, actual_width = raw_frame.shape[0], raw_frame.shape[1]
+                if actual_height != expected_height or actual_width != expected_width:
+                    if expected_width > 0 and expected_height > 0:
+                        raw_frame = cv2.resize(raw_frame, (expected_width, expected_height))
+            try:
+                video_writer.write(raw_frame)
+            except Exception:
+                pass
+            # Save frame as PNG if png_dir is provided
+            if png_dir is not None:
+                png_path = os.path.join(png_dir, f"{frame_num}.png")
+                cv2.imwrite(png_path, raw_frame)
+            # Consistent action selection logic as in record_episode
+            if hasattr(agent, 'select_action'):
+                if agent.__class__.__name__ == 'DQNAgent':
+                    if temperature is None:
+                        action = agent.select_action(state_stack, mode='greedy')
+                    else:
+                        action = agent.select_action(state_stack, mode='softmax', temperature=temperature)
+                else:
+                    action = agent.select_action(temperature=temperature)
+            else:
+                action = agent.select_action()
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            frame_num += 1
+            if agent.__class__.__name__ == 'DQNAgent':
+                state_stack = np.roll(state_stack, shift=-1, axis=0)
+                state_stack[-1] = next_obs
+            if terminated or truncated:
+                break
+
+    # Record random agent videos
+    for i in range(num_random):
+        video_path = os.path.join(working_dir, f'bulk_random_agent_{i+1}{file_ext}')
+        # Create PNG frame directory
+        png_dir = os.path.join(working_dir, f'bulk_random_agent_{i+1}')
+        os.makedirs(png_dir, exist_ok=True)
+        video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
+        record_episode_no_overlay(env, random_agent, video_writer, temperature=temperature, frame_size=frame_size, debug=debug, png_dir=png_dir)
+        video_writer.release()
+        print(f"[Bulk] Random agent video {i+1} saved: {video_path} and frames in {png_dir}")
+    # Record trained agent videos
+    for i in range(num_trained):
+        video_path = os.path.join(working_dir, f'bulk_trained_agent_{checkpoint_name}_{i+1}{file_ext}')
+        # Create PNG frame directory
+        png_dir = os.path.join(working_dir, f'bulk_trained_agent_{checkpoint_name}_{i+1}')
+        os.makedirs(png_dir, exist_ok=True)
+        video_writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
+        record_episode_no_overlay(env, dqn_agent, video_writer, temperature=temperature, frame_size=frame_size, debug=debug, png_dir=png_dir)
+        video_writer.release()
+        print(f"[Bulk] Trained agent video {i+1} saved: {video_path} and frames in {png_dir}")
+    env.close()
+    if no_sync:
+        print(f"\nCopying files from temporary directory to {output_dir}...")
+        os.makedirs(output_dir, exist_ok=True)
+        for filename in os.listdir(temp_dir):
+            src_path = os.path.join(temp_dir, filename)
+            dst_path = os.path.join(output_dir, filename)
+            if os.path.isdir(src_path):
+                continue
+            elif os.path.getsize(src_path) > 1000:
+                shutil.copy2(src_path, dst_path)
+                print(f"Copied: {filename} ({os.path.getsize(dst_path)} bytes)")
+            else:
+                print(f"Skipped corrupted file: {filename}")
+        shutil.rmtree(temp_dir)
+    print("\n[Bulk] All videos generated successfully!")
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Record gameplay videos for Atari Breakout with random and trained agents')
     parser.add_argument('--num_episodes', type=int, default=5, help='Number of episodes to record for each agent')
@@ -502,14 +693,27 @@ if __name__ == '__main__':
     parser.add_argument('--no_sync', action='store_true', help='Use a temporary directory to avoid iCloud sync issues')
     parser.add_argument('--temperature', type=float, default=None, help='Softmax temperature for agent action selection (default: 1.0, inf=greedy/random)')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging for troubleshooting video recording issues')
-    
+    # Bulk generation arguments
+    parser.add_argument('--bulk', action='store_true', help='Enable bulk video generation without overlays')
+    parser.add_argument('--total_videos', type=int, default=10, help='Total number of videos to generate in bulk mode')
+    parser.add_argument('--percent_random', type=float, default=50, help='Percentage of random agent videos in bulk mode (0-100)')
     args = parser.parse_args()
-    
-    record_gameplay_videos(
-        num_episodes=args.num_episodes,
-        output_dir=args.output_dir,
-        skill_level=args.skill_level,
-        no_sync=args.no_sync,
-        temperature=args.temperature,
-        debug=args.debug
-    )
+    if args.bulk:
+        record_bulk_videos(
+            total_videos=args.total_videos,
+            output_dir=args.output_dir,
+            percent_random=args.percent_random,
+            skill_level=args.skill_level,
+            no_sync=args.no_sync,
+            temperature=args.temperature,
+            debug=args.debug
+        )
+    else:
+        record_gameplay_videos(
+            num_episodes=args.num_episodes,
+            output_dir=args.output_dir,
+            skill_level=args.skill_level,
+            no_sync=args.no_sync,
+            temperature=args.temperature,
+            debug=args.debug
+        )

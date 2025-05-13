@@ -30,7 +30,7 @@ This part focuses on building a model that can infer latent actions between cons
      - Implement with straight-through estimator for backpropagation
      - Commitment loss weight: 0.25
    
-   - Decoder: Takes current frame and quantized latent code as input
+   - Decoder: Takes current frame and quantized latent code as input and decodes/predicts the next frame
      - Cross attention mechanism to incorporate the latent action
      - 4 transposed convolutional layers (upsampling)
      - Channel progression: 512→256→128→64→1
