@@ -244,4 +244,21 @@ data/
   This will download and install all required Atari ROMs. If you see errors about missing ROMs, re-run the above command.
 - For more details, see the comments in `requirements.txt`.
 
+## Saving Videos and Frames
+
+You can now generate a large number of gameplay videos and save all frames for each video using the bulk video generation feature. This will save both the video and a folder containing all frames (as PNGs) for each episode in the `bulk_videos` directory.
+
+**Example command:**
+```bash
+python record_videos.py --bulk --output_dir bulk_videos --total_videos 20 --percent_random 30
+```
+- This will generate 20 videos in `bulk_videos/`, with 30% from the random agent and the rest from the trained agent.
+- For each video (e.g., `bulk_random_agent_1.mp4`), a folder with the same name (e.g., `bulk_random_agent_1/`) will be created containing all frames as `0.png`, `1.png`, etc.
+
+## Remaining Tasks and Next Steps
+
+- **Train DQN agent for longer duration:**
+  - Increase the maximum number of training steps to 10,000 for improved performance.
+  - (Experiment tracking is already implemented.)
+
 ---
