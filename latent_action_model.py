@@ -142,11 +142,24 @@ class LatentActionVQVAE(nn.Module):
         self.encoder = Encoder()
         self.vq = VectorQuantizer(num_embeddings=codebook_size, embedding_dim=embedding_dim, commitment_cost=commitment_cost)
         self.decoder = Decoder()
+        
     def forward(self, frame_t, frame_tp1):
-        # frame_t, frame_tp1: (B, 3, 160, 210) or (B, 1, 160, 210)
-        # Concatenate along channel dimension
-        x = torch.cat([frame_t, frame_tp1], dim=1)  # (B, 6, 160, 210)
+        # Original frames: (B, C, 210, 160)
+        # Need to permute to: (B, C, 160, 210) for the model's internal processing
+        frame_t_permuted = frame_t.permute(0, 1, 3, 2)  # (B, C, 210, 160) -> (B, C, 160, 210)
+        frame_tp1_permuted = frame_tp1.permute(0, 1, 3, 2)  # (B, C, 210, 160) -> (B, C, 160, 210)
+        
+        # Concatenate along channel dimension (dim=1)
+        x = torch.cat([frame_t_permuted, frame_tp1_permuted], dim=1)  # (B, 2*C, 160, 210)
+        
         z = self.encoder(x)  # (B, 128, 5, 7)
         quantized, indices, commitment_loss, codebook_loss = self.vq(z)
-        recon = self.decoder(quantized, frame_t)
+        
+        # The decoder expects permuted input
+        recon_permuted = self.decoder(quantized, frame_t_permuted)
+        
+        # IMPORTANT: Permute back to match original frame shape (B, C, 210, 160)
+        # We need to explicitly do this to ensure the output matches the target shape
+        recon = recon_permuted.permute(0, 1, 3, 2)  # (B, C, 160, 210) -> (B, C, 210, 160)
+        
         return recon, indices, commitment_loss, codebook_loss 
