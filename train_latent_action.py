@@ -394,7 +394,11 @@ def train(args):
         frame_t, frame_tp1 = frame_t.to(device), frame_tp1.to(device)
         with torch.amp.autocast(device.type, enabled=(scaler is not None)):
             recon, indices, commit_loss, codebook_loss = model(frame_t, frame_tp1)
-            rec_loss = F.mse_loss(recon, frame_tp1)
+            #rec_loss = F.mse_loss(recon, frame_tp1)
+            frame_diff = torch.abs(frame_tp1 - frame_t)
+            motion_weight = 1.0 + 10.0 * (frame_diff.sum(dim=1, keepdim=True) > 0.05).float()
+            rec_loss = (motion_weight * (recon - frame_tp1)**2).mean()
+
             # Entropy regularization
             entropy, hist = codebook_entropy(indices, 256)
             entropy_reg = -args.entropy_weight * entropy
@@ -515,7 +519,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--max_iters', type=int, default=100000)
+    parser.add_argument('--max_iters', type=int, default=10000)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--lr_min', type=float, default=1e-4)
     parser.add_argument('--grad_accum', type=int, default=1)
@@ -523,15 +527,15 @@ if __name__ == "__main__":
     parser.add_argument('--grayscale', action='store_true', default=False)
     parser.add_argument('--entropy_weight', type=float, default=0.1)
     parser.add_argument('--log_interval', type=int, default=100)
-    parser.add_argument('--recon_interval', type=int, default=500)
-    parser.add_argument('--ckpt_interval', type=int, default=10000)
+    parser.add_argument('--recon_interval', type=int, default=1000)
+    parser.add_argument('--ckpt_interval', type=int, default=5000)
     parser.add_argument('--val_interval', type=int, default=1000)
-    parser.add_argument('--codebook_reset_interval', type=int, default=10000)
+    parser.add_argument('--codebook_reset_interval', type=int, default=2500)
 
     # python train_latent_action.py --analyze --analysis_output_dir='analysis_results'
     parser.add_argument('--analyze', action='store_true', help='Analyze latest checkpoint')
     parser.add_argument('--analysis_output_dir', type=str, default='analysis', help='Output directory for analysis')
-    parser.add_argument('--diagnostic_interval', type=int, default=500, help='Steps between diagnostic visualizations')
+    parser.add_argument('--diagnostic_interval', type=int, default=50000, help='Steps between diagnostic visualizations')
     args = parser.parse_args()
 
     # In the main part, before train() call:

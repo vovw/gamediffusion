@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from typing import List, Tuple, Optional
 
 class AtariFramePairDataset(Dataset):
-    def __init__(self, root_dir: str, split: str = 'train', grayscale: bool = True, seed: int = 42, split_ratio=(0.8, 0.1, 0.1)):
+    def __init__(self, root_dir: str, split: str = 'train', grayscale: bool = True, seed: int = 42, split_ratio=(0.95, 0.05, 0)):
         """
         Args:
             root_dir: Directory containing episode folders with PNG frames.
