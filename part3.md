@@ -1,5 +1,8 @@
 # Part 3: Next Frame Prediction Model
 
+## Redundant
+It seems part 3 is redundant, since decoder trained in part 2 is the world model that we need.
+
 ## Overview
 In this part, we'll build a model that can predict the next frame given the current frame and a latent action. This model will serve as the core world model for our Breakout game simulation.
 

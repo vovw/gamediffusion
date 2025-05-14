@@ -4,10 +4,16 @@ import cv2
 from typing import Tuple, Dict, Any
 
 class AtariBreakoutEnv:
-    """Wrapper for Atari Breakout environment with preprocessing."""
+    """
+    Wrapper for Atari Breakout environment with preprocessing.
+    If return_rgb=True, returns original RGB frames (210, 160, 3) instead of preprocessed grayscale (84, 84).
+    """
     
-    def __init__(self):
-        """Initialize the environment with specific settings."""
+    def __init__(self, return_rgb: bool = False):
+        """Initialize the environment with specific settings.
+        Args:
+            return_rgb: If True, return original RGB frames in reset/step.
+        """
         # Create the base Atari environment with specific settings
         self.env = gym.make(
             "ALE/Breakout-v5",
@@ -33,6 +39,8 @@ class AtariBreakoutEnv:
         # Reward shaping configuration
         self.living_penalty = -0.005  # Small negative reward per time step
         self.life_loss_penalty = 0.0  # Substantial penalty for losing a life
+        
+        self.return_rgb = return_rgb
     
     def preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Convert RGB observation to 84x84 grayscale."""
@@ -45,15 +53,21 @@ class AtariBreakoutEnv:
         return resized
     
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Reset the environment and return initial observation."""
+        """Reset the environment and return initial observation.
+        Returns original RGB if self.return_rgb else preprocessed grayscale.
+        """
         obs, info = self.env.reset()
         self.lives = info.get('lives', 5)  # Get initial lives
         
+        if self.return_rgb:
+            return obs, info
         processed_obs = self.preprocess_observation(obs)
         return processed_obs, info
     
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        """Take a step in the environment."""
+        """Take a step in the environment.
+        Returns original RGB if self.return_rgb else preprocessed grayscale.
+        """
         obs, reward, terminated, truncated, info = self.env.step(action)
         
         # Track lives to detect life loss
@@ -68,6 +82,8 @@ class AtariBreakoutEnv:
         shaped_reward = reward + self.living_penalty + life_loss_reward
         #shaped_reward = reward
         
+        if self.return_rgb:
+            return obs, shaped_reward, terminated, truncated, info
         processed_obs = self.preprocess_observation(obs)
         return processed_obs, shaped_reward, terminated, truncated, info
     

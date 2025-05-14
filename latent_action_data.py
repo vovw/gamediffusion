@@ -4,8 +4,9 @@ import random
 import numpy as np
 from PIL import Image
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, random_split
 from typing import List, Tuple, Optional
+import json
 
 class AtariFramePairDataset(Dataset):
     def __init__(self, root_dir: str, split: str = 'train', grayscale: bool = True, seed: int = 42, split_ratio=(0.95, 0.05, 0)):
@@ -72,4 +73,37 @@ class AtariFramePairDataset(Dataset):
         frame_t_path, frame_tp1_path = self.pairs[idx]
         frame_t = self._load_frame(frame_t_path)
         frame_tp1 = self._load_frame(frame_tp1_path)
-        return torch.from_numpy(frame_t), torch.from_numpy(frame_tp1) 
+        return torch.from_numpy(frame_t), torch.from_numpy(frame_tp1)
+
+class ActionLatentPairDataset(Dataset):
+    def __init__(self, json_path):
+        with open(json_path, 'r') as f:
+            self.data = json.load(f)
+        self.num_classes = 4
+        self.latent_dim = 35
+        self.codebook_size = 256
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+        action = item['action']
+        latent_code = item['latent_code']
+        # One-hot encode action
+        action_onehot = np.zeros(self.num_classes, dtype=np.float32)
+        action_onehot[action] = 1.0
+        latent_code = np.array(latent_code, dtype=np.int64)
+        return torch.from_numpy(action_onehot), torch.from_numpy(latent_code)
+
+def get_action_latent_dataloaders(batch_size=128, num_workers=0, pin_memory=True, seed=42):
+    json_path = os.path.join('data', 'actions', 'action_latent_pairs.json')
+    dataset = ActionLatentPairDataset(json_path)
+    n = len(dataset)
+    n_train = int(0.8 * n)
+    n_val = n - n_train
+    torch.manual_seed(seed)
+    train_set, val_set = random_split(dataset, [n_train, n_val])
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+    return train_loader, val_loader 

@@ -1,5 +1,27 @@
 # Part 4: Action Mapping Model
 
+## Progress & Status
+- [x] **Data Collection:** Complete
+    - Collected (action, latent_code) pairs using a random agent and trained VQ-VAE
+    - **Stored in:** `data/actions/action_latent_pairs.json`
+    - **Format:** JSON list of dicts, each with:
+      - `'action'`: int (0–3, corresponding to NOOP, FIRE, RIGHT, LEFT)
+      - `'latent_code'`: list of 35 ints (each 0–255, codebook indices, flattened from (5, 7) grid)
+      - Example: `{ "action": 2, "latent_code": [123, 45, ..., 87] }`
+    - Codebook size: 256 (indices 0–255), embedding size: 128
+    - Latent code shape: (5, 7) grid, flattened to 35 indices per frame pair
+- [x] **Model Design:** Complete
+    - Implemented `ActionToLatentMLP` in `latent_action_model.py` (MLP, 4→512→256→35×256)
+    - Supports temperature-based sampling for latent code prediction
+- [x] **Data Loader:** Complete
+    - Implemented `ActionLatentPairDataset` and `get_action_latent_dataloaders` in `latent_action_data.py`
+    - Loads, splits, and batches (action, latent_code) pairs for training/validation
+- [ ] **Training:** Pending
+- [ ] **Analysis:** Pending
+- [ ] **Testing:** Pending
+- [ ] **Refinement:** Pending
+- [ ] **Integration:** Pending
+
 ## Overview
 In this part, we'll create a model that maps the actual game controls (LEFT, RIGHT, NOTHING) to the latent action space we learned in Part 2. This will allow us to control the world model with normal game inputs.
 
@@ -8,52 +30,62 @@ In this part, we'll create a model that maps the actual game controls (LEFT, RIG
 - [part2.md](part2.md): Provides the latent action codes
 - [part5.md](part5.md): Uses this mapping to convert user inputs into world model updates
 
-## Implementation Details
+## Implementation Steps
 
-### Data Preparation
-1. For each frame transition in our dataset:
-   - Get the original action (LEFT, RIGHT, NOTHING) from Part 1 recordings
-   - Get the corresponding latent action code predicted by our model from Part 2
-   - Create pairs of (original_action, latent_action_code)
-2. Create a balanced dataset by sampling equally from each action type
-3. Split into train/validation sets (80%/20%)
+### 1. Data Collection
+- **[Done]** Load your trained VQ-VAE from Part 2
+- **[Done]** Use random agent to play Breakout and collect data:
+  - Record action taken at each step
+  - Process frame pairs through VQ-VAE
+  - Extract quantized latent code indices (35 per pair, from a codebook of 256)
+  - Store (action, latent_code) pairs as JSON in `data/actions/action_latent_pairs.json`
+- **[Done]** Aim for 100,000+ pairs across multiple episodes
+- **[Done]** Calculate action frequency and latent code distribution statistics
 
-### Model Architecture
-1. Implement a simple MLP classifier:
-   - Input: One-hot encoded original action (3 dimensions)
-   - Hidden layers: 512 → 256 → 128 neurons
-   - Output: Softmax over all possible latent action codes (e.g., 256 classes)
-   - ReLU activations and dropout (0.2) between hidden layers
+### 2. Model Design
+- **[Done]** Created a simple MLP classifier in `latent_action_model.py`:
+  - Input: One-hot encoded action (4 dimensions)
+  - Hidden layers: 512 → 256 with ReLU and dropout
+  - Output: 35 × 256 logits (for each latent code position, 256-way softmax)
+  - Includes temperature-based sampling for latent code prediction
 
-2. Alternative approach (if above doesn't work well):
-   - Create separate probability distributions for each action type
-   - When an action is selected, sample from its specific distribution
-   - This allows for one-to-many mapping (one action can cause different latent actions)
+### 3. Data Loader
+- **[Done]** Implemented in `latent_action_data.py`:
+  - Loads `data/actions/action_latent_pairs.json`
+  - Splits into 80% training, 20% validation
+  - Returns PyTorch DataLoader objects with (one-hot action, latent code indices)
 
-### Training Process
-1. Train for 20,000 iterations with batch size 128
-2. Use Adam optimizer with learning rate 1e-3
-3. Cross-entropy loss for classification
-4. Track accuracy on validation set
-5. Save model checkpoints every 5,000 iterations
+### 4. Training
+- [Pending] Split data: 80% training, 20% validation
+- [Pending] Train with cross-entropy loss and Adam optimizer (lr=1e-3)
+- [Pending] Train for ~50 epochs
+- [Pending] Monitor validation accuracy
+- [Pending] Save best model checkpoint
 
-### Evaluation and Analysis
-1. Compute confusion matrix between predicted and actual latent codes
-2. Calculate accuracy per action type
-3. Visualize the distribution of latent codes for each action
-4. Qualitative analysis:
-   - For each action, show examples of frame transitions it produces
-   - Identify any inconsistencies or unexpected mappings
+### 5. Analysis
+- [Pending] For each action, analyze predicted vs actual latent code distributions
+- [Pending] Visualize top-k most likely codes per action
+- [Pending] Create histograms showing latent code frequency by action
+- [Pending] Measure prediction accuracy per action type
 
-### Inference Pipeline
-1. Create a simple function that:
-   - Takes a game action as input
-   - Returns the most likely latent action code
-   - Alternatively, samples from the probability distribution
-2. Test this pipeline by feeding actions and visualizing resulting transitions
+### 6. Testing
+- [Pending] Implement test function: action → predicted latent code
+- [Pending] Validate in environment by comparing predicted vs actual codes
+- [Pending] Calculate overall and per-action accuracy
+- [Pending] Identify patterns in successful/failed predictions
 
-### Success Criteria
-- Classification accuracy > 80%
-- Clear visual distinction between effects of different actions
-- Paddle movements correctly corresponding to LEFT/RIGHT actions
-- NOTHING action correctly mapped to appropriate latent codes
+### 7. Refinement (if needed)
+- [Pending] If accuracy < 60%, consider:
+  - Adding game state features as context
+  - Using probabilistic output instead of single prediction
+  - Creating separate models per action
+  - Balancing dataset
+
+### 8. Integration
+- [Pending] Create simple inference pipeline for your world model
+- [Pending] Document performance characteristics and limitations
+
+## Expected Outcome
+- Model with 60-70%+ accuracy mapping actions to latent codes
+- Clear differentiation between action effects
+- Documented interface for world model integration

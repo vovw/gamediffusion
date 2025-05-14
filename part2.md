@@ -66,7 +66,9 @@ This part focuses on building a model that can infer latent actions between cons
    - GPU memory usage and training speed metrics
 6. Save model checkpoints:
    - Every 10,000 iterations
-   - Best model based on validation reconstruction loss
+   - Best model based on validation reconstruction loss (stored at `checkpoints/latent_action/best.pt`)
+
+**Only latent action extraction remains to be implemented.**
 
 ### Latent Action Extraction
 1. Create a function to extract latent action indices from any pair of consecutive frames

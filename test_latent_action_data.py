@@ -1,7 +1,7 @@
 import pytest
 import torch
 from torch.utils.data import DataLoader
-from latent_action_data import AtariFramePairDataset
+from latent_action_data import AtariFramePairDataset, get_action_latent_dataloaders
 from latent_action_model import LatentActionVQVAE
 import os
 import tempfile
@@ -61,10 +61,10 @@ def test_normalization():
 # --- Latent Action Model Tests ---
 def test_latent_action_model_forward():
     model = LatentActionVQVAE()
-    frame_t = torch.randn(2, 3, 160, 210)
-    frame_tp1 = torch.randn(2, 3, 160, 210)
+    frame_t = torch.randn(2, 3, 210, 160)
+    frame_tp1 = torch.randn(2, 3, 210, 160)
     recon, indices, commitment_loss, codebook_loss = model(frame_t, frame_tp1)
-    assert recon.shape == (2, 3, 160, 210)
+    assert recon.shape == (2, 3, 210, 160)
     assert indices.shape == (2, 5, 7)
     assert commitment_loss.shape == ()
     assert codebook_loss.shape == ()
@@ -80,9 +80,31 @@ def test_codebook_usage():
 
 def test_loss_computation():
     model = LatentActionVQVAE()
-    frame_t = torch.randn(2, 3, 160, 210)
-    frame_tp1 = torch.randn(2, 3, 160, 210)
+    frame_t = torch.randn(2, 3, 210, 160)
+    frame_tp1 = torch.randn(2, 3, 210, 160)
     recon, indices, commitment_loss, codebook_loss = model(frame_t, frame_tp1)
     mse = torch.nn.functional.mse_loss(recon, frame_tp1)
     total_loss = mse + commitment_loss + codebook_loss
-    assert total_loss.requires_grad 
+    assert total_loss.requires_grad
+
+@pytest.mark.parametrize("batch_size", [8, 32])
+def test_dataloader_shapes_and_types(batch_size):
+    train_loader, val_loader = get_action_latent_dataloaders(batch_size=batch_size)
+    batch = next(iter(train_loader))
+    actions, latents = batch
+    # actions: (batch, 4), latents: (batch, 35)
+    assert actions.shape[1] == 4
+    assert latents.shape[1] == 35
+    assert actions.dtype == torch.float32
+    assert latents.dtype in (torch.int64, torch.long)
+    assert actions.shape[0] == batch_size
+    # Check value ranges
+    assert torch.all((latents >= 0) & (latents < 256))
+
+def test_train_val_split():
+    train_loader, val_loader = get_action_latent_dataloaders(batch_size=16)
+    train_len = len(train_loader.dataset)
+    val_len = len(val_loader.dataset)
+    total = train_len + val_len
+    assert abs(train_len / total - 0.8) < 0.05
+    assert abs(val_len / total - 0.2) < 0.05 

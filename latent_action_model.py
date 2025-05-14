@@ -179,3 +179,40 @@ class LatentActionVQVAE(nn.Module):
             return recon, indices, commitment_loss, codebook_loss, z
         else:
             return recon, indices, commitment_loss, codebook_loss
+
+class ActionToLatentMLP(nn.Module):
+    def __init__(self, input_dim=4, hidden1=512, hidden2=256, latent_dim=35, codebook_size=256, dropout=0.2):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.codebook_size = codebook_size
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden1, hidden2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden2, latent_dim * codebook_size)
+        )
+        self._compile_if_available()
+
+    def forward(self, x):
+        out = self.net(x)  # (batch, latent_dim * codebook_size)
+        out = out.view(-1, self.latent_dim, self.codebook_size)
+        return out
+
+    def sample_latents(self, logits, temperature=1.0):
+        # logits: (batch, 35, 256)
+        if temperature <= 0:
+            raise ValueError("Temperature must be > 0")
+        probs = F.softmax(logits / temperature, dim=-1)  # (batch, 35, 256)
+        batch, latent_dim, codebook_size = probs.shape
+        # Sample for each position
+        samples = torch.multinomial(probs.view(-1, codebook_size), 1).view(batch, latent_dim)
+        return samples
+
+    def _compile_if_available(self):
+        try:
+            self.forward = torch.compile(self.forward, dynamic=True)
+        except Exception:
+            pass  # torch.compile not available or not supported
