@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 from latent_action_data import AtariFramePairDataset
-from latent_action_model import LatentActionVQVAE
+from latent_action_model import LatentActionVQVAE, load_latent_action_model
 
 # ----------------------
 # Utility Functions
@@ -246,7 +246,7 @@ def print_model_structure(model):
         elif i == 10:
             print("  ...")
 
-def analyze_checkpoint(checkpoint_path, data_dir, output_dir, device=None):
+def analyze_checkpoint(checkpoint_path, data_dir, output_dir, device=None, grayscale=False):
     """
     Load a model from checkpoint and run diagnostic visualizations.
     
@@ -268,30 +268,17 @@ def analyze_checkpoint(checkpoint_path, data_dir, output_dir, device=None):
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # Create model and load state
-    model = LatentActionVQVAE()
-    # In your analysis function
-    print("=== Checkpoint model structure ===")
-    for key in list(checkpoint['model'].keys())[:20]:
-        print(f"  {key}: {checkpoint['model'][key].shape}")
-    print("  ...")
 
-    print("\n=== Current model structure ===")
-    print_model_structure(model)
 
-    model.load_state_dict(checkpoint['model'])
+    model, step = load_latent_action_model(checkpoint_path, device)
+    
     model = model.to(device)
     model.eval()
     
-    step = checkpoint.get('step', 0)
     print(f"Loaded checkpoint from step {step}")
     
     # Setup data
-    val_set = AtariFramePairDataset(data_dir, split='val')
+    val_set = AtariFramePairDataset(data_dir, split='val', grayscale=grayscale)
     val_loader = DataLoader(val_set, batch_size=8, shuffle=True, num_workers=2)
     
     # Run diagnostics

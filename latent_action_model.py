@@ -2,6 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def load_latent_action_model(model_path, device):
+    model = LatentActionVQVAE()
+    checkpoint = torch.load(model_path, map_location=device)
+    # Fix state dict keys by removing the '*orig*mod.' prefix
+    fixed_state_dict = {}
+    for k, v in checkpoint['model'].items():
+        if k.startswith('_orig_mod.'):
+            fixed_state_dict[k.replace('_orig_mod.', '')] = v
+        else:
+            fixed_state_dict[k] = v
+    model.load_state_dict(fixed_state_dict)
+    return model, checkpoint['step']
+
 class Encoder(nn.Module):
     """
     Encoder for VQ-VAE latent action model.
