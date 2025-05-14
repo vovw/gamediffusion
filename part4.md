@@ -16,7 +16,11 @@
 - [x] **Data Loader:** Complete
     - Implemented `ActionLatentPairDataset` and `get_action_latent_dataloaders` in `latent_action_data.py`
     - Loads, splits, and batches (action, latent_code) pairs for training/validation
-- [ ] **Training:** Pending
+- [x] **Training:** Complete
+    - Trained for 50 epochs using Adam (lr=1e-3), cross-entropy loss, mixed precision, and gradient clipping
+    - **Best validation accuracy:** 82.7%
+    - **Best checkpoint saved to:** `checkpoints/latent_action/action_to_latent_best.pt`
+    - All metrics and checkpoints logged to wandb (project: `atari-action-to-latent`)
 - [ ] **Analysis:** Pending
 - [ ] **Testing:** Pending
 - [ ] **Refinement:** Pending
@@ -56,11 +60,10 @@ In this part, we'll create a model that maps the actual game controls (LEFT, RIG
   - Returns PyTorch DataLoader objects with (one-hot action, latent code indices)
 
 ### 4. Training
-- [Pending] Split data: 80% training, 20% validation
-- [Pending] Train with cross-entropy loss and Adam optimizer (lr=1e-3)
-- [Pending] Train for ~50 epochs
-- [Pending] Monitor validation accuracy
-- [Pending] Save best model checkpoint
+- **[Done]** Split data: 80% training, 20% validation
+- **[Done]** Trained with cross-entropy loss and Adam optimizer (lr=1e-3) for 50 epochs
+- **[Done]** Monitored validation accuracy and saved best model checkpoint
+- **[Done]** Best model checkpoint: `checkpoints/latent_action/action_to_latent_best.pt` (val acc: 82.7%)
 
 ### 5. Analysis
 - [Pending] For each action, analyze predicted vs actual latent code distributions
@@ -86,6 +89,6 @@ In this part, we'll create a model that maps the actual game controls (LEFT, RIG
 - [Pending] Document performance characteristics and limitations
 
 ## Expected Outcome
-- Model with 60-70%+ accuracy mapping actions to latent codes
+- Model with 60-70%+ accuracy mapping actions to latent codes (achieved 82.7%)
 - Clear differentiation between action effects
 - Documented interface for world model integration
