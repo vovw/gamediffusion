@@ -142,8 +142,8 @@ class LatentActionVQVAE(nn.Module):
         self.encoder = Encoder()
         self.vq = VectorQuantizer(num_embeddings=codebook_size, embedding_dim=embedding_dim, commitment_cost=commitment_cost)
         self.decoder = Decoder()
-        
-    def forward(self, frame_t, frame_tp1):
+
+    def forward(self, frame_t, frame_tp1, return_latent=False):
         # Original frames: (B, C, 210, 160)
         # Need to permute to: (B, C, 160, 210) for the model's internal processing
         frame_t_permuted = frame_t.permute(0, 1, 3, 2)  # (B, C, 210, 160) -> (B, C, 160, 210)
@@ -162,4 +162,7 @@ class LatentActionVQVAE(nn.Module):
         # We need to explicitly do this to ensure the output matches the target shape
         recon = recon_permuted.permute(0, 1, 3, 2)  # (B, C, 160, 210) -> (B, C, 210, 160)
         
-        return recon, indices, commitment_loss, codebook_loss 
+        if return_latent:
+            return recon, indices, commitment_loss, codebook_loss, z
+        else:
+            return recon, indices, commitment_loss, codebook_loss

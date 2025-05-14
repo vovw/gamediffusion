@@ -10,6 +10,7 @@ opencv-python==4.9.0.80
 wandb==0.16.3
 # For progress bars
 tqdm==4.67.1
+matplotlib==3.10.3
 
 # Note:
 # After installing requirements, run the following command to ensure all Atari ROMs are available:
