@@ -10,13 +10,17 @@ In this final part, we'll integrate all previous components to create a playable
 
 ## Implementation Details
 
-### Game State Representation
-1. Maintain the current frame as the game state
-2. Initialize with a real starting frame from the dataset
-3. Track additional metadata:
-   - Score (extracted from frame via simple image processing)
-   - Lives remaining (extracted from frame)
-   - Ball position (tracked for debugging)
+### Neural game with a random player
+1. Take first frame of the game (data/0.png)
+2. Load latent action model (checkpoints/latent_action/best.pt) via load_latent_action_model in latent_action_model.py
+3. Load action to latent action model (checkpoints/latent_action/action_to_latent_best.pt)
+4. Make a function that takes a discrete action [NOOP, FIRE, RIGHT, ACTION] and maps it to latent action
+5. Make a loop in which game is played randomly
+- Feed into decoder of latent action model, the first frame of the game and a random action (translated into latent)
+- The generated frame by decoder is saved as a frame
+- Then it is fed back into the decoder again with another random action
+- Do it for 100 steps
+- From all frames collected, make a video
 
 ### Game Loop Implementation
 1. Display current frame to the player
