@@ -8,3 +8,6 @@ eval_logs/
 wandb/
 bulk_videos/
 *reconstructions*
+comparison_frames/
+debug_frames/
+debug/

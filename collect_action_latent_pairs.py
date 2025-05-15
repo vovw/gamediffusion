@@ -147,6 +147,8 @@ def collect_action_state_latent_triples(
     try:
         while len(actions) < n_pairs:
             obs, _ = env.reset()
+            # Add this line to flip the channels to match VQ-VAE training format
+            obs = obs[:, :, ::-1].copy()  # Swap BGR -> RGB to match PNG format
             frame_t = torch.from_numpy(obs).float().permute(2, 0, 1) / 255.0  # (3, 210, 160)
             last2_frames = [frame_t.clone(), frame_t.clone()]
             done = False
@@ -154,13 +156,19 @@ def collect_action_state_latent_triples(
             while not done and steps < max_steps_per_episode and len(actions) < n_pairs:
                 action = agent.select_action()
                 next_obs, reward, terminated, truncated, info = env.step(action)
+                # Also swap channels for next_obs
+                next_obs = next_obs[:, :, ::-1].copy()  # Swap BGR -> RGB
                 frame_tp1 = torch.from_numpy(next_obs).float().permute(2, 0, 1) / 255.0
                 stacked_frames = torch.cat(last2_frames, dim=0)
                 try:
                     with torch.no_grad():
                         f0 = last2_frames[0].unsqueeze(0).to(device)
                         f1 = last2_frames[1].unsqueeze(0).to(device)
-                        _, indices, *_ = model(f0, f1)
+
+                        f1_batch = last2_frames[1].unsqueeze(0).to(device)  # [1, 3, 210, 160]
+                        frame_tp1_batch = frame_tp1.unsqueeze(0).to(device) # [1, 3, 210, 160]
+
+                        _, indices, *_ = model(f1_batch, frame_tp1_batch)
                 except Exception as e:
                     print(f"Error during model call: {e}")
                     print(f"frame_t shape: {f0.shape}, dtype: {f0.dtype}")

@@ -11,7 +11,7 @@ from latent_action_data import get_action_latent_dataloaders, get_action_state_l
 
 # Hyperparameters
 BATCH_SIZE = 256
-LEARNING_RATE = 5e-4
+LEARNING_RATE = 1e-3
 EPOCHS = 250
 GRAD_CLIP = 1.0
 CHECKPOINT_DIR = 'checkpoints/latent_action/'
