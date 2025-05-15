@@ -1,84 +1,56 @@
 # Part 5: Playable World Model Interface
 
 ## Overview
-In this final part, we'll integrate all previous components to create a playable Breakout game that runs entirely through our learned world model. This will demonstrate the effectiveness of our approach and provide an interactive way to evaluate the model.
+This part demonstrates a playable Breakout game running entirely through the learned world model. The game loop, user interface, and neural inference are implemented in `play_neural_breakout.py`. A random agent version for video generation is implemented in `neural_random_game.py`.
 
 ## Related Components
-- [part2.md](part2.md): Provides the latent action codebook
-- [part3.md](part3.md): Provides the next frame prediction model
-- [part4.md](part4.md): Provides the action-to-latent mapping
+- [part2.md](part2.md): Latent action codebook
+- [part3.md](part3.md): Next frame prediction model
+- [part4.md](part4.md): Action-to-latent mapping
 
 ## Implementation Details
 
-### Neural game with a random player
-1. Take first frame of the game (data/0.png)
-2. Load latent action model (checkpoints/latent_action/best.pt) via load_latent_action_model in latent_action_model.py
-3. Load action to latent action model (checkpoints/latent_action/action_to_latent_best.pt)
-4. Make a function that takes a discrete action [NOOP, FIRE, RIGHT, ACTION] and maps it to latent action
-5. Make a loop in which game is played randomly
-- Feed into decoder of latent action model, the first frame of the game and a random action (translated into latent)
-- The generated frame by decoder is saved as a frame
-- Then it is fed back into the decoder again with another random action
-- Do it for 100 steps
-- From all frames collected, make a video
+### Neural Game with a Random Player (`neural_random_game.py`)
+- Loads the initial frame (`data/0.png`).
+- Loads the world model (`checkpoints/latent_action/best.pt`) using `load_latent_action_model` from `latent_action_model.py`.
+- Loads the action-to-latent model (`checkpoints/latent_action/action_to_latent_best.pt` or `action_to_latent_best.pt` for action-only).
+- For each step:
+  - Samples a random discrete action (`[NOOP, FIRE, RIGHT, LEFT]`).
+  - Maps the action (and optionally last 2 frames) to a latent code using the action-to-latent model.
+  - Decodes the next frame using the world model's decoder.
+  - Feeds the generated frame back for the next step.
+- Repeats for a specified number of steps (default 100).
+- Saves all frames as a video (`data/neural_random_game.gif`).
 
-### Game Loop Implementation
-1. Display current frame to the player
-2. Capture player input (LEFT, RIGHT, NOTHING)
-3. Convert player action to latent action using mapping from Part 4
-4. Use next frame prediction model from Part 3 to generate the next frame
-5. Update game state with the predicted frame
-6. Repeat at 15-20 FPS for smooth gameplay
+### Playable Neural Game (`play_neural_breakout.py`)
+- Loads the initial frame (`data/0.png`).
+- Loads the world model and action-to-latent model (always using the action+state variant).
+- Uses PyGame for the user interface:
+  - Displays the current frame (scaled up for visibility).
+  - Shows step count, last action, and temperature at the bottom.
+- Controls:
+  - `SPACE`: Fire
+  - `LEFT ARROW`: Move Left
+  - `RIGHT ARROW`: Move Right
+  - `.` (PERIOD): No Operation (NOOP)
+  - `ESC` or `Q`: Quit
+- Game loop:
+  - Captures user input each frame (default action is NOOP).
+  - Maps the action and last 2 frames to a latent code.
+  - Uses the world model to generate the next frame.
+  - Updates the display at 15 FPS.
+- No explicit score, lives, or advanced UI elements are shown.
+- No reality anchoring, frame caching, async prediction, or frame skipping is implemented.
+- All neural inference runs on GPU if available, otherwise MPS or CPU.
+- Uses `torch.compile` for model speedup on CUDA.
 
-### User Interface
-1. Create a simple PyGame interface:
-   - Main game window showing current frame (scaled up for visibility)
-   - Score display
-   - Lives remaining
-   - Optional debug info (predicted latent code, certainty, etc.)
-2. Controls:
-   - Left/Right arrow keys for paddle movement
-   - Space to pause/resume
-   - R to reset game
-   - D to toggle debug information
-
-### Performance Optimization
-1. Implement frame caching for common states
-2. Run neural network inference on GPU
-3. Use asynchronous prediction (predict next frames in background)
-4. Maintain consistent frame rate with frame skipping if needed
-
-### Reality Anchoring (Preventing Drift)
-1. Detect and correct physically impossible states:
-   - Ball moving through bricks
-   - Ball disappearing
-   - Paddle moving too quickly
-2. Implement simple heuristics for corrections
-3. Optional: Implement occasional "reality anchoring" by resetting to a similar known state
-
-### Evaluation and User Testing
-1. Invite 3-5 players to try the game and provide feedback
-2. Record gameplay sessions for analysis
-3. Metrics to track:
-   - Average score achieved
-   - Average game duration
-   - Number of obvious visual glitches
-   - Player satisfaction ratings
-
-### Extended Features (If Time Permits)
-1. Multi-step planning:
-   - Show predicted future frames based on current action
-   - Help player make strategic decisions
-2. Model exploration:
-   - UI to browse and visualize latent action effects
-   - Heatmap of next frame prediction confidence
-3. Comparison mode:
-   - Side-by-side play with real Breakout game
-   - Visual diff highlighting prediction errors
+### Notes
+- The game is a pure neural simulation: all transitions are predicted by the learned model, not the real environment.
+- The only feedback to the player is the visual game state and action display.
+- For evaluation, users can play and observe the model's consistency and visual quality.
 
 ### Success Criteria
-- Game runs at stable 15+ FPS
-- Ball physics remains consistent for extended play
-- Paddle responds correctly to player inputs
-- Brick destruction works properly
-- Game is actually playable and somewhat enjoyable
+- Game runs at stable 15 FPS.
+- Paddle responds to user input.
+- Visual transitions are plausible for extended play.
+- The game is playable and demonstrates the learned world model in action.

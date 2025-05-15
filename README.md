@@ -1,3 +1,9 @@
+# Disclaimer
+
+**This codebase has only been tested for Atari Breakout. It is very hacky, trained on a small number of samples, and is not at all optimized. Use at your own risk!**
+
+---
+
 # Atari Pixels Project
 
 This project explores deep reinforcement learning for Atari Breakout using PyTorch, with a focus on modern exploration strategies and robust data collection for downstream tasks.
@@ -38,16 +44,89 @@ python -m AutoROM --accept-license
 - To record videos of a trained (or random) agent:
   ```bash
   python record_videos.py --checkpoint_path <path_to_checkpoint> --output_dir videos/
+  e.g. python record_videos.py --bulk --total_videos 100 --percent_random 15 --output_dir bulk_videos
   ```
 - Replace `<path_to_checkpoint>` with the path to your saved model checkpoint (see `checkpoints/`).
 - Videos will be saved as MP4 files in the specified output directory.
 
 ---
 
-## Upcoming Parts
-- [part2.md](part2.md) _(pending)_
-- [part3.md](part3.md) _(pending)_
-- [part4.md](part4.md) _(pending)_
-- [part5.md](part5.md) _(pending)_
+## Part 2: Train Latent Action Prediction Model
+- **Prepare data:** Ensure gameplay videos are available in `bulk_videos/` (from Part 1).
+- **Train VQ-VAE latent action model:**
+  ```bash
+  python train_latent_action.py
+  ```
+- **Checkpoints and logs:**
+  - Best model: `checkpoints/latent_action/best.pt`
+  - Processed data: see `data/` and `vqvae_recons/`
+  - Training logs and metrics: Weights & Biases (wandb)
+- **Evaluation:**
+  - Run `test_latent_action_model.py` for automated tests and metrics
+  - Visualize reconstructions and codebook usage as described in part2.md
 
-Each part will build on the data and models from Part 1, covering latent action learning, action mapping, and advanced evaluation. 
+See [part2.md](part2.md) for full details, implementation, and next steps.
+
+---
+
+## Part 3: Next Frame Prediction Model (World Model)
+- **Note:** The decoder from Part 2 serves as the world model. No separate training is required unless you wish to experiment with alternative architectures.
+- **Evaluate world model:**
+  - Use the decoder to predict next frames given current frame and latent action index
+  - For multi-step prediction and rollout analysis, see evaluation code in `test_latent_action_model.py`
+
+---
+
+## Part 4: Train Action-to-Latent Mapping Model
+- **Extract (action, latent_code) pairs using trained VQ-VAE:**
+  ```bash
+  python collect_action_latent_pairs.py
+  ```
+  - Output: `data/actions/action_latent_pairs.json`
+- **Train the action-to-latent MLP:**
+  ```bash
+  python train_action_to_latent.py
+  ```
+  - Best checkpoint: `checkpoints/latent_action/action_to_latent_best.pt`
+- **Evaluate mapping accuracy:**
+  - Run `test_latent_action_data_collection.py` and `test_latent_action_model.py`
+  - Analyze accuracy and code distributions as described in part4.md
+
+See [part4.md](part4.md) for full details, implementation, and next steps.
+
+---
+
+## Part 5: Playable Neural Breakout (World Model Demo)
+- **Run a random agent in the neural world model:**
+  ```bash
+  python neural_random_game.py
+  ```
+  - Output: `data/neural_random_game.gif` (video of neural gameplay)
+- **Play Breakout using the neural world model:**
+  ```bash
+  python play_neural_breakout.py
+  ```
+  - Controls: SPACE (Fire), LEFT/RIGHT ARROW, PERIOD (NOOP), ESC/Q (Quit)
+  - Requires trained models from Parts 2 and 4
+- **All inference runs on GPU if available, otherwise MPS/CPU.**
+- **For best performance, ensure torch.compile is enabled and models are on CUDA.**
+
+See [part5.md](part5.md) for full details, implementation, and next steps.
+
+---
+
+## Utility & Debug Scripts
+- **debug_color_channels.py:** Visualizes and compares color channels between environment frames and PNG files to debug color mismatches.
+- **debug_first_step_difference.py:** Compares predicted vs. ground truth latents and reconstructions for the first step of the neural random game, helping debug model discrepancies.
+- **neural_random_game.py:** Runs a random agent in the neural world model and saves a GIF of the generated gameplay for qualitative evaluation.
+
+---
+## Suggested Improvements
+- Train DQN agent for longer (by increasing max steps per episode to 10,000 and target scores of 200+)
+- Generate 1000s of videos of agent playing with a higher percentage of random agent actions:
+  ```bash
+  python record_videos.py --bulk --total_videos 1000 --percent_random 20 --output_dir bulk_videos
+  ```
+- Train the latent action model for much longer to achieve convergence
+- Collect much more data for action → latent code mapping
+- Try with different Atari games

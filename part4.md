@@ -61,9 +61,9 @@ In this part, we'll create a model that maps the actual game controls (LEFT, RIG
 
 ### 4. Training
 - **[Done]** Split data: 80% training, 20% validation
-- **[Done]** Trained with cross-entropy loss and Adam optimizer (lr=1e-3) for 50 epochs
+- **[Done]** Trained with cross-entropy loss and Adam optimizer (lr=1e-3) for 250 epochs
 - **[Done]** Monitored validation accuracy and saved best model checkpoint
-- **[Done]** Best model checkpoint: `checkpoints/latent_action/action_to_latent_best.pt` (val acc: 82.7%)
+- **[Done]** Best model checkpoint: `checkpoints/latent_action/action_to_latent_best.pt` (val acc: 96.3%)
 
 ### 5. Analysis
 - [Pending] For each action, analyze predicted vs actual latent code distributions

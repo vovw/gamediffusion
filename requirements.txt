@@ -13,6 +13,7 @@ tqdm==4.67.1
 matplotlib==3.10.3
 imageio==2.37.0
 imageio[ffmpeg]
+pygame==2.6.1
 # Note:
 # After installing requirements, run the following command to ensure all Atari ROMs are available:
 #   python -m AutoROM --accept-license

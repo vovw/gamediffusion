@@ -134,16 +134,16 @@ def main():
     init_frame=init_frame, 
     device=device,
     action_names=['NOOP', 'FIRE', 'RIGHT', 'LEFT'],
-    num_steps=20,
+    num_steps=40,
     with_frames=args.with_frames  # Pass this parameter
     )
-    visualize_ground_truth_comparison(
-        world_model=world_model, 
-        action_to_latent=model,
-        device=device,
-        frames_dir='comparison_frames', 
-        num_steps=20, 
-        temperature=0.01)
+    # visualize_ground_truth_comparison(
+    #     world_model=world_model, 
+    #     action_to_latent=model,
+    #     device=device,
+    #     frames_dir='comparison_frames', 
+    #     num_steps=20, 
+    #     temperature=0.01)
 
 def visualize_ground_truth_comparison(
         world_model, action_to_latent, device,
@@ -329,7 +329,7 @@ def visualize_ground_truth_comparison(
 def visualize_latent_changes(
         world_model, action_to_latent, 
         init_frame, device, action_names=['NOOP', 'FIRE', 'RIGHT', 'LEFT'],
-        frames_dir='debug_frames', make_gif=True, num_steps=20, temperature=0.001,
+        frames_dir='debug_frames', make_gif=True, num_steps=50, temperature=0.001,
         with_frames=False):
     """Create visualizations showing latent changes alongside game frames"""
     
