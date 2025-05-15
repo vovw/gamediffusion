@@ -194,7 +194,6 @@ class ActionToLatentMLP(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden2, latent_dim * codebook_size)
         )
-        self._compile_if_available()
 
     def forward(self, x):
         out = self.net(x)  # (batch, latent_dim * codebook_size)
@@ -211,8 +210,45 @@ class ActionToLatentMLP(nn.Module):
         samples = torch.multinomial(probs.view(-1, codebook_size), 1).view(batch, latent_dim)
         return samples
 
-    def _compile_if_available(self):
-        try:
-            self.forward = torch.compile(self.forward, dynamic=True)
-        except Exception:
-            pass  # torch.compile not available or not supported
+class ActionStateToLatentMLP(nn.Module):
+    def __init__(self, action_dim=4, hidden1=512, hidden2=256, latent_dim=35, codebook_size=256, dropout=0.2):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.codebook_size = codebook_size
+        # Frame encoder for 2 RGB frames (6 channels, 210x160)
+        self.frame_encoder = nn.Sequential(
+            nn.Conv2d(6, 16, kernel_size=8, stride=4),  # (B, 16, 51, 39)
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=4, stride=2),  # (B, 32, 24, 18)
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2),  # (B, 64, 11, 8)
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 11 * 8, 128),
+            nn.ReLU(),
+        )
+        # Combined MLP for action + frame features
+        self.net = nn.Sequential(
+            nn.Linear(action_dim + 128, hidden1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden1, hidden2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden2, latent_dim * codebook_size)
+        )
+
+    def forward(self, action, frames):
+        # action: (B, 4), frames: (B, 6, 210, 160)
+        frame_features = self.frame_encoder(frames)
+        combined = torch.cat([action, frame_features], dim=1)
+        out = self.net(combined)
+        return out.view(-1, self.latent_dim, self.codebook_size)
+
+    def sample_latents(self, logits, temperature=1.0):
+        if temperature <= 0:
+            raise ValueError("Temperature must be > 0")
+        probs = F.softmax(logits / temperature, dim=-1)
+        batch, latent_dim, codebook_size = probs.shape
+        samples = torch.multinomial(probs.view(-1, codebook_size), 1).view(batch, latent_dim)
+        return samples

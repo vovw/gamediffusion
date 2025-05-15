@@ -96,9 +96,79 @@ class ActionLatentPairDataset(Dataset):
         latent_code = np.array(latent_code, dtype=np.int64)
         return torch.from_numpy(action_onehot), torch.from_numpy(latent_code)
 
+class ActionStateLatentTripleDataset(Dataset):
+    def __init__(self, json_path):
+        with open(json_path, 'r') as f:
+            self.data = json.load(f)
+        self.num_classes = 4
+        self.latent_dim = 35
+        self.codebook_size = 256
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+        action = item['action']
+        frames = np.array(item['frames'], dtype=np.float32)  # (6, 210, 160), already normalized
+        latent_code = item['latent_code']
+        # One-hot encode action
+        action_onehot = np.zeros(self.num_classes, dtype=np.float32)
+        action_onehot[action] = 1.0
+        latent_code = np.array(latent_code, dtype=np.int64)
+        return (
+            torch.from_numpy(action_onehot),
+            torch.from_numpy(frames),
+            torch.from_numpy(latent_code)
+        )
+
+class ActionStateLatentTripleNPZDataset(Dataset):
+    def __init__(self, npz_path):
+        data = np.load(npz_path)
+        self.actions = data['actions']  # (N,)
+        self.frames = data['frames']    # (N, 6, 210, 160)
+        self.latents = data['latents']  # (N, 35)
+        self.num_classes = 4
+        self.latent_dim = 35
+        self.codebook_size = 256
+
+    def __len__(self):
+        return len(self.actions)
+
+    def __getitem__(self, idx):
+        action = self.actions[idx]
+        frames = self.frames[idx]
+        latent_code = self.latents[idx]
+        # One-hot encode action
+        action_onehot = np.zeros(self.num_classes, dtype=np.float32)
+        action_onehot[action] = 1.0
+        return (
+            torch.from_numpy(action_onehot),
+            torch.from_numpy(frames.astype(np.float32)),
+            torch.from_numpy(latent_code.astype(np.int64))
+        )
+
 def get_action_latent_dataloaders(batch_size=128, num_workers=0, pin_memory=True, seed=42):
     json_path = os.path.join('data', 'actions', 'action_latent_pairs.json')
     dataset = ActionLatentPairDataset(json_path)
+    n = len(dataset)
+    n_train = int(0.8 * n)
+    n_val = n - n_train
+    torch.manual_seed(seed)
+    train_set, val_set = random_split(dataset, [n_train, n_val])
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+    return train_loader, val_loader
+
+def get_action_state_latent_dataloaders(batch_size=128, num_workers=0, pin_memory=True, seed=42):
+    npz_path = os.path.join('data', 'actions', 'action_state_latent_triples.npz')
+    json_path = os.path.join('data', 'actions', 'action_state_latent_triples.json')
+    if os.path.exists(npz_path):
+        dataset = ActionStateLatentTripleNPZDataset(npz_path)
+    elif os.path.exists(json_path):
+        dataset = ActionStateLatentTripleDataset(json_path)
+    else:
+        raise FileNotFoundError(f"Neither {npz_path} nor {json_path} found.")
     n = len(dataset)
     n_train = int(0.8 * n)
     n_val = n - n_train

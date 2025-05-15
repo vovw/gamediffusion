@@ -5,13 +5,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import wandb
-from latent_action_model import ActionToLatentMLP
-from latent_action_data import get_action_latent_dataloaders
+import argparse
+from latent_action_model import ActionToLatentMLP, ActionStateToLatentMLP
+from latent_action_data import get_action_latent_dataloaders, get_action_state_latent_dataloaders
 
 # Hyperparameters
 BATCH_SIZE = 256
-LEARNING_RATE = 1e-3
-EPOCHS = 50
+LEARNING_RATE = 5e-4
+EPOCHS = 250
 GRAD_CLIP = 1.0
 CHECKPOINT_DIR = 'checkpoints/latent_action/'
 MODEL_NAME = 'action_to_latent_best.pt'
@@ -35,17 +36,27 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def train_one_epoch(model, loader, criterion, optimizer, device, scaler=None):
+def train_one_epoch(model, loader, criterion, optimizer, device, scaler=None, with_frames=False):
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
-    for actions, latents in tqdm(loader, desc='Train', leave=False):
-        actions = actions.to(device)
+    for batch in tqdm(loader, desc='Train', leave=False):
+        if with_frames:
+            actions, frames, latents = batch
+            actions = actions.to(device)
+            frames = frames.to(device)
+        else:
+            actions, latents = batch
+            actions = actions.to(device)
+            frames = None
         latents = latents.to(device)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(enabled=(scaler is not None)):
-            logits = model(actions)  # (B, 35, 256)
+            if with_frames:
+                logits = model(actions, frames)
+            else:
+                logits = model(actions)
             loss = criterion(logits.view(-1, 256), latents.view(-1))
         if scaler:
             scaler.scale(loss).backward()
@@ -58,7 +69,6 @@ def train_one_epoch(model, loader, criterion, optimizer, device, scaler=None):
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
             optimizer.step()
         running_loss += loss.item() * actions.size(0)
-        # Accuracy: compare argmax(logits) with latents for all positions
         preds = logits.argmax(dim=-1)
         correct += (preds == latents).sum().item()
         total += latents.numel()
@@ -66,16 +76,26 @@ def train_one_epoch(model, loader, criterion, optimizer, device, scaler=None):
     accuracy = correct / total
     return avg_loss, accuracy
 
-def eval_one_epoch(model, loader, criterion, device):
+def eval_one_epoch(model, loader, criterion, device, with_frames=False):
     model.eval()
     running_loss = 0.0
     correct = 0
     total = 0
     with torch.no_grad():
-        for actions, latents in tqdm(loader, desc='Val', leave=False):
-            actions = actions.to(device)
+        for batch in tqdm(loader, desc='Val', leave=False):
+            if with_frames:
+                actions, frames, latents = batch
+                actions = actions.to(device)
+                frames = frames.to(device)
+            else:
+                actions, latents = batch
+                actions = actions.to(device)
+                frames = None
             latents = latents.to(device)
-            logits = model(actions)
+            if with_frames:
+                logits = model(actions, frames)
+            else:
+                logits = model(actions)
             loss = criterion(logits.view(-1, 256), latents.view(-1))
             running_loss += loss.item() * actions.size(0)
             preds = logits.argmax(dim=-1)
@@ -86,6 +106,10 @@ def eval_one_epoch(model, loader, criterion, device):
     return avg_loss, accuracy
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--with_frames', action='store_true', help='Use action+state (frames) model and data')
+    args = parser.parse_args()
+
     set_seed(SEED)
     device = get_device()
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -96,16 +120,22 @@ def main():
         'learning_rate': LEARNING_RATE,
         'epochs': EPOCHS,
         'grad_clip': GRAD_CLIP,
-        'seed': SEED
+        'seed': SEED,
+        'with_frames': args.with_frames
     })
 
     # Data
-    train_loader, val_loader = get_action_latent_dataloaders(batch_size=BATCH_SIZE)
-
-    # Model
-    model = ActionToLatentMLP()
+    if args.with_frames:
+        train_loader, val_loader = get_action_state_latent_dataloaders(batch_size=BATCH_SIZE)
+        model = ActionStateToLatentMLP()
+        model_name = 'action_state_to_latent_best.pt'
+    else:
+        train_loader, val_loader = get_action_latent_dataloaders(batch_size=BATCH_SIZE)
+        model = ActionToLatentMLP()
+        model_name = 'action_to_latent_best.pt'
     model = model.to(device)
-    model = torch.compile(model)
+    if device.type == 'cuda':
+        model = torch.compile(model)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -114,12 +144,12 @@ def main():
     scaler = torch.cuda.amp.GradScaler() if device.type == 'cuda' else None
 
     best_val_acc = 0.0
-    best_ckpt_path = os.path.join(CHECKPOINT_DIR, MODEL_NAME)
+    best_ckpt_path = os.path.join(CHECKPOINT_DIR, model_name)
 
     for epoch in range(1, EPOCHS + 1):
         print(f"Epoch {epoch}/{EPOCHS}")
-        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
-        val_loss, val_acc = eval_one_epoch(model, val_loader, criterion, device)
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler, with_frames=args.with_frames)
+        val_loss, val_acc = eval_one_epoch(model, val_loader, criterion, device, with_frames=args.with_frames)
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
         wandb.log({
