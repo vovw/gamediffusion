@@ -8,6 +8,7 @@
 
 This projects aims to create a neural playable version of Atari Breakout by learning purely from videos of the game. It's a small replica of what [Google's Genie project](https://deepmind.google/discover/blog/genie-2-a-large-scale-foundation-world-model/), where they learned an interactive and playable world models purely through videos of game.
 
+[![Watch the video](https://img.youtube.com/vi/H8Eh1HlLzZM/0.jpg)](https://www.youtube.com/watch?v=H8Eh1HlLzZM)
 
 
 ## Part 1: DQN Training & Exploration
