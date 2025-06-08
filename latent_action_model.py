@@ -251,4 +251,4 @@ class ActionStateToLatentMLP(nn.Module):
         probs = F.softmax(logits / temperature, dim=-1)
         batch, latent_dim, codebook_size = probs.shape
         samples = torch.multinomial(probs.view(-1, codebook_size), 1).view(batch, latent_dim)
-        return samples
+        return samples 
