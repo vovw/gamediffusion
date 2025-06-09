@@ -72,16 +72,8 @@ python interactive_pong_world.py
 
 ## References
 
-- DreamerV3, GameGAN, VideoGPT, MuZero, PlaNet
+- DreamerV3, World Models, GameGAN, VideoGPT, MuZero, PlaNet, DIAMOND, o3
 
----
 
-## Notes
+*Built for rapid iteration. Scale thoughtfully and with care.*
 
-- No yap. Pure speed. For research iteration.
-- Use `torch.compile` and MPS/CPU fallback.
-- All outputs in `assets/`. No external logging by default.
-
----
-
-*Built for rapid iteration. Scale thoughtfully.*
