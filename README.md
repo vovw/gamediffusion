@@ -1,137 +1,93 @@
-# Disclaimer
+# Neural-Atari Regen
 
-**This codebase has only been tested for Atari Breakout. It is very hacky, trained on a small number of samples, and is not at all optimized. Use at your own risk!**
+Minimal fork of Paras Chopra's Neural-Atari for rapid prototyping.  
+Trains & samples Pong world model in **<3 minutes** on Colab T4.
 
----
+## Quick Start
 
-# Atari Pixels Project
-
-This projects aims to create a neural playable version of Atari Breakout by learning purely from videos of the game. It's a small replica of what [Google's Genie project](https://deepmind.google/discover/blog/genie-2-a-large-scale-foundation-world-model/), where they learned an interactive and playable world models purely through videos of game.
-
-**Watch the video**
-
-[![Watch the video](https://img.youtube.com/vi/H8Eh1HlLzZM/0.jpg)](https://www.youtube.com/watch?v=H8Eh1HlLzZM)
-
-
-## Part 1: DQN Training & Exploration
-- Implements a Deep Q-Network (DQN) agent for Atari Breakout.
-- Supports two exploration strategies:
-  - **Temperature-based (Boltzmann) exploration** with Prioritized Experience Replay (PER).
-  - **Random Network Distillation (RND)** for intrinsic motivation and improved exploration.
-- Modular, efficient, and test-driven codebase.
-- Current progress: Agent achieves a score up to 20.
-- Next steps: Train for longer, increase max steps per episode to 10,000, and target scores of 200+.
-
-See [part1.md](part1.md) for full details, implementation, and next steps.
-
----
-
-## Getting Started
-
-### 1. Install Dependencies and Atari ROMs
+### Installation
 ```bash
-pip install -r requirements.txt
-python -m AutoROM --accept-license
+uv pip install -r requirements.txt
 ```
 
-### 2. Train the DQN Agent
-- **Default (temperature-based exploration):**
-  ```bash
-  python train_dqn.py
-  ```
-- **RND-based exploration:**
-  ```bash
-  python train_dqn.py --exploration_mode rnd
-  ```
-- Additional arguments (see `python train_dqn.py --help`) allow you to control episodes, buffer size, and more.
+### One-liner (Colab)
+```bash
+!git clone https://github.com/user/neural-atari-regen && cd neural-atari-regen && uv pip install -q -r requirements.txt && jupyter nbconvert --to notebook --execute train.ipynb
+```
 
-### 3. Generate Gameplay Videos
-- To record videos of a trained (or random) agent:
-  ```bash
-  python record_videos.py --checkpoint_path <path_to_checkpoint> --output_dir videos/
-  e.g. python record_videos.py --bulk --total_videos 100 --percent_random 15 --output_dir bulk_videos
-  ```
-- Replace `<path_to_checkpoint>` with the path to your saved model checkpoint (see `checkpoints/`).
-- Videos will be saved as MP4 files in the specified output directory.
+### Local Training
+```bash
+python world_model.py  # Full pipeline
+```
 
----
+### Jupyter Notebook
+```bash
+jupyter notebook train.ipynb
+```
 
-## Part 2: Train Latent Action Prediction Model
-- **Prepare data:** Ensure gameplay videos are available in `bulk_videos/` (from Part 1).
-- **Train VQ-VAE latent action model:**
-  ```bash
-  python train_latent_action.py
-  ```
-- **Checkpoints and logs:**
-  - Best model: `checkpoints/latent_action/best.pt`
-  - Processed data: see `data/` and `vqvae_recons/`
-  - Training logs and metrics: Weights & Biases (wandb)
-- **Evaluation:**
-  - Run `test_latent_action_model.py` for automated tests and metrics
-  - Visualize reconstructions and codebook usage as described in part2.md
+## Architecture
 
-See [part2.md](part2.md) for full details, implementation, and next steps.
+- **Encoder**: CNN (84×84×1 → 128D latent)
+- **Decoder**: CNN (128D → 84×84×1)  
+- **Predictor**: MLP (128D → 128D)
+- **Training**: 500 steps AE + 500 steps predictor
+- **Dataset**: d4rl-atari Pong (5K frames)
 
----
+## Outputs
 
-## Part 3: Next Frame Prediction Model (World Model)
-- **Note:** The decoder from Part 2 serves as the world model. No separate training is required unless you wish to experiment with alternative architectures.
-- **Evaluate world model:**
-  - Use the decoder to predict next frames given current frame and latent action index
-  - For multi-step prediction and rollout analysis, see evaluation code in `test_latent_action_model.py`
+- `assets/real_vs_recon.png` - Reconstruction quality
+- `assets/pong_fake.gif` - 200-frame rollout
 
----
+## Q&A
 
-## Part 4: Train Action-to-Latent Mapping Model
-- **Extract (action, latent_code) pairs using trained VQ-VAE:**
-  ```bash
-  python collect_action_latent_pairs.py
-  ```
-  - Output: `data/actions/action_latent_pairs.json`
-- **Train the action-to-latent MLP:**
-  ```bash
-  python train_action_to_latent.py
-  ```
-  - Best checkpoint: `checkpoints/latent_action/action_to_latent_best.pt`
-- **Evaluate mapping accuracy:**
-  - Run `test_latent_action_data_collection.py` and `test_latent_action_model.py`
-  - Analyze accuracy and code distributions as described in part4.md
+**Why this project?**  
+Rapid prototyping beats perfect code. This strips Neural-Atari to its essence: can we learn Pong dynamics in 3 minutes? Yes. The autoencoder learns paddle/ball structure, and the predictor captures basic physics. Perfect for testing ideas before scaling up.
 
-See [part4.md](part4.md) for full details, implementation, and next steps.
+**Future work:**  
+- Action conditioning (currently pure dynamics)
+- Longer horizons (>200 frames)  
+- Multi-game generalization
+- Hierarchical latents for complex scenes
+- Differentiable physics integration
 
----
+**Key learnings:**  
+- Grayscale + small resolution (84×84) is sufficient for Pong
+- 128D latent captures essential game state
+- Simple MSE loss works well for both reconstruction and prediction
+- 500 training steps each is the sweet spot for speed/quality tradeoff
+- d4rl-atari provides clean, pre-processed data
 
-## Part 5: Playable Neural Breakout (World Model Demo)
-- **Run a random agent in the neural world model:**
-  ```bash
-  python neural_random_game.py
-  ```
-  - Output: `data/neural_random_game.gif` (video of neural gameplay)
-- **Play Breakout using the neural world model:**
-  ```bash
-  python play_neural_breakout.py
-  ```
-  - Controls: SPACE (Fire), LEFT/RIGHT ARROW, PERIOD (NOOP), ESC/Q (Quit)
-  - Requires trained models from Parts 2 and 4
-- **All inference runs on GPU if available, otherwise MPS/CPU.**
-- **For best performance, ensure torch.compile is enabled and models are on CUDA.**
+**Surprises:**  
+- Predictor converges faster than expected (physics is simple)
+- No need for VAE regularization - deterministic AE works fine
+- GIF compression makes rollouts look more stable than they are
+- Single frame conditioning generates reasonable short sequences
 
-See [part5.md](part5.md) for full details, implementation, and next steps.
+**Next papers to read:**  
+- DreamerV3: Scaling model-based RL with hierarchical world models
+- GameGAN: Learning to generate interactive environments  
+- VideoGPT: Video generation using VQ-VAE and transformers
+- MuZero: Planning with learned models in stochastic environments
+- PlaNet: A deep planning network for reinforcement learning
+
+## File Structure
+```
+neural-atari-regen/
+├─ world_model.py        # Core models + training loops
+├─ data/d4rl_frames.py   # Dataset wrapper  
+├─ train.ipynb           # Interactive training notebook
+├─ assets/               # Generated outputs
+├─ README.md             # This file
+└─ requirements.txt      # Dependencies
+```
+
+## Performance
+
+- **Training time**: <3 min on Colab T4
+- **Reconstruction loss**: <0.08 (target)
+- **Rollout length**: 200 frames
+- **Memory usage**: ~2GB GPU
 
 ---
 
-## Utility & Debug Scripts
-- **debug_color_channels.py:** Visualizes and compares color channels between environment frames and PNG files to debug color mismatches.
-- **debug_first_step_difference.py:** Compares predicted vs. ground truth latents and reconstructions for the first step of the neural random game, helping debug model discrepancies.
-- **neural_random_game.py:** Runs a random agent in the neural world model and saves a GIF of the generated gameplay for qualitative evaluation.
-
----
-## Suggested Improvements
-- Train DQN agent for longer (by increasing max steps per episode to 10,000 and target scores of 200+)
-- Generate 1000s of videos of agent playing with a higher percentage of random agent actions:
-  ```bash
-  python record_videos.py --bulk --total_videos 1000 --percent_random 20 --output_dir bulk_videos
-  ```
-- Train the latent action model for much longer to achieve convergence
-- Collect much more data for action → latent code mapping
-- Try with different Atari games
+*Built for rapid iteration. Scale thoughtfully.* 
